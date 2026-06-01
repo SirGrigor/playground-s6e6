@@ -1,0 +1,35 @@
+# venv
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.pytest_cache/
+.ruff_cache/
+
+# data — downloaded via kaggle CLI, too big for git
+data/raw/
+data/external/
+
+# reference notebooks (downloaded from kaggle, not our code)
+recon_notebooks/
+
+# artifacts — regeneratable
+probs/
+submissions/
+models/
+catboost_info/
+reports/figs/
+reports/*.html
+
+# scratch
+/tmp_*
+*.log
+*.swp
+.DS_Store
+.idea/
+
+# per-run releases log (regenerates per Colab session)
+releases.jsonl
+
+# keep split definitions, not the data itself
+!data/splits/

@@ -1,0 +1,9 @@
+# ============================================================================
+# ACTIVE script — the one thing colab/bootstrap.py runs. One line, no '#'.
+# Switch experiment = edit this line + push, then re-run the Colab Run cell.
+#
+# CURRENT = Phase 0 EDA / recon. Confirms column parity vs SDSS17 original,
+# class balance, redshift separation, sentinel (-9999) audit, and writes the
+# baseline figs the dashboard embeds. No model trained yet.
+# ============================================================================
+notebooks/01_eda.py
