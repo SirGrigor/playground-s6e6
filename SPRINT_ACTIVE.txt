@@ -2,10 +2,11 @@
 # ACTIVE script — the one thing colab/bootstrap.py runs. One line, no '#'.
 # Switch experiment = edit this line + push, then re-run the Colab Run cell.
 #
-# CURRENT = v3 add spectral_type + galaxy_population (the Playground-added columns the
-# v2 recon found v1 was silently dropping). EDA prints their per-class distribution +
-# nullity (read [eda:*]), then retrains LGBM with them as native categoricals.
-# THE KEY OUTPUT: [eda:*] structure + v3 — RESULT holdout vs v1 0.9655 / v2 0.9639.
-# (v2 leak=03; v1 baseline=02; recon=01 — leak was 0% coverage, dead end.)
+# CURRENT = v4 ERROR DIAGNOSTIC (not a model change). We plateaued ~0.9655 (v3 extras
+# were redundant, +0.0002). This names the gap: per-class recall + confusion cells, and
+# an error-predictability probe (can a GBDT predict the model's own mistakes?).
+# THE KEY OUTPUT: [error-cell] which class drags + top cells, and [error-predict] AUC +
+# verdict (STRUCTURED→FE the top features / NOISE→ceiling real, pivot to ensemble).
+# (v3 extras=04; v2 leak=03 dead; v1=02; recon=01.)
 # ============================================================================
-notebooks/04_v3_extra_features.py
+notebooks/05_v4_error_diagnostic.py
