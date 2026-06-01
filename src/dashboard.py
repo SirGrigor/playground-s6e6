@@ -27,9 +27,13 @@ from pathlib import Path
 
 from .config import METRIC, REPORTS, ROOT
 
-# --- ascent anchors (balanced accuracy; update after Phase 0) ---------------
-FLOOR = 0.950    # redshift-only BAL-ACC baseline guess — REPLACE with measured value
-TARGET = 0.980   # top-50 LB balanced accuracy — REPLACE after LB audit
+# --- ascent anchors (balanced accuracy) -------------------------------------
+# Set from the first real Colab run + LB audit (2026-06-01):
+#   v1 holdout = 0.9655 (our carry-forward floor — the bar to beat)
+#   public LB: #1=0.97037, top-50 line ≈ 0.9668 (early, drifts up). No industry-research
+#   labs in top-5 → compute parity is NOT a concern; top-50 genuinely achievable solo.
+FLOOR = 0.9655   # v1 LGBM baseline (current best to beat)
+TARGET = 0.9700  # comfortably-top-50 bar (≈ current top-10; headroom as the LB drifts up)
 HIGHER_BETTER = True
 
 try:
