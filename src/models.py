@@ -76,6 +76,50 @@ def cat_oof(Xdev, ydev, Xhold, Xte, n_folds: int = N_FOLDS, on_fold=None):
     return oof, hold, test, fold_va
 
 
+def nn_oof(Xdev, ydev, Xhold, Xte, n_folds: int = N_FOLDS, on_fold=None):
+    """RealMLP (pytabkit) OOF — the NON-GBDT paradigm for decorrelation.
+
+    Neural net with PLR embeddings + learned categorical embeddings → genuinely different
+    decision boundary than trees → (hopefully) ρ<0.9 vs the GBDTs → ensemble lift. GPU if
+    available. Categoricals via cat_col_names (cast to string); numeric NaN filled with the
+    dev-fold median (RealMLP's scaling transforms don't tolerate NaN like GBDTs do).
+    """
+    from pytabkit import RealMLP_TD_Classifier
+    try:
+        import torch
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    except Exception:
+        device = "cpu"
+
+    cats = _cat_cols(Xdev)
+    num = [c for c in Xdev.columns if c not in cats]
+    medians = Xdev[num].astype(float).median()
+
+    def prep(df):
+        d = df.copy()
+        for c in cats:
+            d[c] = d[c].astype("string").fillna("NA").astype(object)
+        for c in num:
+            d[c] = d[c].astype(float).fillna(medians[c])
+        return d
+    Xd, Xh, Xt = prep(Xdev), prep(Xhold), prep(Xte)
+
+    oof = np.zeros((len(Xd), len(CLASSES)))
+    hold = np.zeros((len(Xh), len(CLASSES)))
+    test = np.zeros((len(Xt), len(CLASSES)))
+    fold_va = []
+    for i, (tr, va) in enumerate(stratified_folds(ydev, n_folds), 1):
+        if on_fold:
+            on_fold(i, n_folds)
+        m = RealMLP_TD_Classifier(device=device, random_state=MODEL_SEED, n_cv=1, verbosity=0)
+        m.fit(Xd.iloc[tr], np.asarray(ydev)[tr], cat_col_names=cats)
+        oof[va] = m.predict_proba(Xd.iloc[va])
+        hold += m.predict_proba(Xh) / n_folds
+        test += m.predict_proba(Xt) / n_folds
+        fold_va.append(va)
+    return oof, hold, test, fold_va
+
+
 def xgb_oof(Xdev, ydev, Xhold, Xte, n_folds: int = N_FOLDS, on_fold=None):
     """XGBoost OOF (natural distribution). enable_categorical uses pandas category dtype."""
     import xgboost as xgb

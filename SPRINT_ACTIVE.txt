@@ -2,11 +2,11 @@
 # ACTIVE script — the one thing colab/bootstrap.py runs. One line, no '#'.
 # Switch experiment = edit this line + push, then re-run the Colab Run cell.
 #
-# CURRENT = v6 MODEL ZOO + ENSEMBLE. v5 proved the decision rule is Pareto-exhausted →
-# only lever left is better PROBABILITIES. Trains LGBM + CatBoost + XGBoost (natural dist),
-# reports each one's tuned bal-acc, the ρ-decorrelation between them (make-or-break for
-# ensembling — synthetic showed 0.65-0.79, real room likely), and a weight-searched ensemble.
-# THE KEY OUTPUT: single-model holdouts, [rho] pairwise corr, [ensemble] best weights + v6
-# RESULT vs v5/v3 0.9657. (v5 decision=06; v4 diag=05; v3=04; v2 leak=03 dead; v1=02.)
+# CURRENT = v7 NEURAL NET (RealMLP) + GBDT+NN ENSEMBLE. CV↔LB confirmed honest (v6 0.9662
+# LB). GBDT family saturated (ρ→0.95). NN is the one untried paradigm → may decorrelate
+# (ρ<0.9) → ensemble lift. Trains LGBM+XGB+RealMLP, reports each tuned bal-acc, ρ matrix,
+# weight-searched ensemble. NN is try/except-wrapped (failure → GBDT ensemble still ships).
+# THE KEY OUTPUT: [rho] lgb~nn / xgb~nn (is it <0.95?) + v7 RESULT vs v6 0.9662.
+# NN trains 256 epochs → +25-60 min on T4. (v6 zoo=07; v5=06; v4 diag=05; v3=04; v2=03; v1=02.)
 # ============================================================================
-notebooks/07_v6_model_zoo.py
+notebooks/08_v7_nn.py

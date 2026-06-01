@@ -32,6 +32,7 @@ GH_REPO = "SirGrigor/playground-s6e6"
 ORIGINAL_DATASET = "fedesoriano/stellar-classification-dataset-sdss17"
 DEPS = ["numpy", "pandas", "scipy", "scikit-learn", "pyarrow",
         "lightgbm", "xgboost", "catboost",
+        "pytabkit", "torch",          # v7 RealMLP (neural net) — Colab has torch+GPU preinstalled
         "matplotlib", "seaborn", "rich", "joblib"]
 ARTIFACT_DIRS = ("probs", "submissions", "reports")
 # Our own toolkits — fresh-cloned, NOT pip'd. (repo_url, vendor_subdir)
