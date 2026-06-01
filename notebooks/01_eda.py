@@ -106,6 +106,9 @@ def main() -> None:
         y_true, y_pred, proba, acc = base
         panels = render_all_panels(y_true, y_pred, proba, prefix="baseline_redshift")
         print(f"[viz] wrote {len(panels)} panels: {sorted(panels)}")
+        # AUC diagnostics (OvR + OvO + scalar) — separability, NOT the comp metric.
+        from src.metrics import format_auc_report, multiclass_auc_report
+        print("[auc] " + format_auc_report(multiclass_auc_report(y_true, proba)).replace("\n", "\n      "))
 
     out = render_html(prefix="baseline_redshift", title="S6E6 — Phase 0 recon")
     print(f"[dashboard] {out}")

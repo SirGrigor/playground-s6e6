@@ -228,6 +228,37 @@ def fold_score_boxplot(fold_scores: dict[str, Sequence[float]], *, prefix="pool"
 
 
 @_safe
+def ovo_auc_panel(y_true, proba, *, labels=None, prefix="model"):
+    """One-vs-one pairwise AUC bars — the GALAXY↔QSO pair (the crux) highlighted.
+
+    Complements roc_panel (which is one-vs-rest). OvO is imbalance-robust (Hand & Till)
+    and directly measures the pairwise separability that decides this competition.
+    """
+    import matplotlib.pyplot as plt
+
+    from .metrics import multiclass_auc_report
+
+    rep = multiclass_auc_report(y_true, proba, labels=labels)
+    pairs = list(rep["ovo_per_pair"].items())
+    if not pairs:
+        return None
+    pairs.sort(key=lambda kv: kv[1])
+    names = [p for p, _ in pairs]
+    vals = [v for _, v in pairs]
+    colors = ["crimson" if {"GALAXY", "QSO"} == set(n.split("|")) else "#4c72b0" for n in names]
+
+    fig, ax = plt.subplots(figsize=(6.5, 0.7 * len(names) + 2))
+    ax.barh(names, vals, color=colors)
+    for i, v in enumerate(vals):
+        ax.text(v, i, f" {v:.4f}", va="center", fontsize=9)
+    ax.set_xlim(min(0.9, min(vals) - 0.01), 1.001)
+    ax.set_xlabel("one-vs-one AUC")
+    ax.set_title(f"{prefix} — OvO pairwise AUC (red = GALAXY↔QSO) | macro {rep['ovo_macro']:.4f}",
+                 fontsize=10, fontweight="bold")
+    return _save(fig, _figpath(prefix, "ovo_auc"))
+
+
+@_safe
 def proba_rho_matrix(probas: dict[str, np.ndarray], *, klass_index=0, prefix="pool"):
     """Rank-correlation heatmap between models' P(class) vectors — ensemble diversity.
 
@@ -267,6 +298,7 @@ def render_all_panels(y_true, y_pred, proba, *, labels=None, fold_scores=None, p
         ("confusion", lambda: confusion_matrix_panel(y_true, y_pred, labels=labels, prefix=prefix)),
         ("report", lambda: classification_report_panel(y_true, y_pred, labels=labels, prefix=prefix)),
         ("roc", lambda: roc_panel(y_true, proba, labels=labels, prefix=prefix)),
+        ("ovo_auc", lambda: ovo_auc_panel(y_true, proba, labels=labels, prefix=prefix)),
         ("pr", lambda: pr_panel(y_true, proba, labels=labels, prefix=prefix)),
         ("class_balance", lambda: class_balance_panel(y_true, y_pred, labels=labels, prefix=prefix)),
     ]

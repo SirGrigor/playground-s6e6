@@ -208,7 +208,7 @@ def render_html(panels: dict[str, Path] | None = None, *, prefix: str = "latest"
         )
     diary_html.append("</table>")
 
-    panel_order = ["confusion", "report", "roc", "pr", "class_balance", "fold_scores", "rho_matrix"]
+    panel_order = ["confusion", "report", "roc", "ovo_auc", "pr", "class_balance", "fold_scores", "rho_matrix"]
     ordered = [k for k in panel_order if k in panels] + [k for k in panels if k not in panel_order]
     panels_html = "".join(
         f"<figure><figcaption>{k}</figcaption>{_img_tag(panels[k])}</figure>" for k in ordered
