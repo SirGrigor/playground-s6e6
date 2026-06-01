@@ -6,6 +6,7 @@ Metric: **balanced_accuracy**. Source of truth: `experiments.jsonl` (git-tracked
 
 | ver | parent | predicted Δ | actual Δ | holdout balanced_accuracy | OOF balanced_accuracy | gap | hypothesis | flags |
 |---|---|---|---|---|---|---|---|---|
+| [v1](versions/v1.md) | `—` | +0.00000 | — | 0.96548 | 0.96483 | +0.00065 | LGBM on redshift+bands+colors with class-balanced weights and OOF-t... | ⚠ multiple_changes |
 
 ## Read more
 - Per-version write-ups: `docs/versions/<vN>.md`
