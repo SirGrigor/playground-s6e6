@@ -5,11 +5,18 @@ final 2 submissions. Forums for signals/opinions/ideas ✓; copying notebook out
 blend ✗ until finals — and we aim to *not need them*.
 
 ## The problem in one paragraph
-Multiclass (GALAXY / STAR / QSO) on SDSS17-derived synthetic data. `redshift` separates
-most rows (STAR ≈ 0, GALAXY low-moderate, QSO high) → near-ceiling accuracy. The synthetic
-redshift 3-bin baseline already hits ~0.97. The competition is the last 1–2%: the
-**galaxy↔QSO confusion cell** at moderate redshift + the **−9999 sentinel** rows. This is an
-error-cell / residual-diagnostic problem.
+Multiclass (GALAXY / STAR / QSO) on SDSS17-derived synthetic data. **Metric = balanced
+accuracy** (macro-avg per-class recall — CONFIRMED 2026-06-01). Submission is LABELS
+(`id,class`), not probabilities. Deadline **2026-06-30**. Swag only, no medals.
+`redshift` separates most rows (STAR ≈ 0, GALAXY low-moderate, QSO high) → near-ceiling.
+The competition is the last 1–2%: the **galaxy↔QSO confusion cell** at moderate redshift +
+the **−9999 sentinel** rows. This is an error-cell / residual-diagnostic problem.
+
+**Balanced accuracy changes the game vs plain accuracy:** rare classes (STAR ~22%, QSO ~19%)
+weigh equally to GALAXY (~59%). So QSO recall is worth as much as GALAXY recall → **per-class
+decision-threshold tuning to equalize recall** (not maximize raw accuracy) is a first-class
+lever, and the galaxy↔QSO cell is doubly central (QSO is both rare and the confused class).
+Score everything through `src.metrics.competition_score` (balanced_accuracy_score).
 
 ## Phases (each gated by the experiment diary — hypothesis + predicted Δ before any fit)
 
@@ -53,7 +60,9 @@ Colab-native (`colab/bootstrap.py` single source of truth + thin `colab_runner.i
 (`feedback_colab-vendor-not-pip-own-code`). Artifacts + diary sync to Drive + git each run.
 
 ## Open items
-- **Metric unconfirmed** — almost certainly Accuracy; confirm on /evaluation. If logloss:
-  flip `config.GREATER_IS_BETTER`, calibration becomes first-class.
-- FLOOR/TARGET in `dashboard.py` are placeholders → set after Phase-0 baseline + LB audit.
+- ✅ **Metric confirmed** — balanced accuracy, labels submission, deadline 2026-06-30.
+- FLOOR/TARGET in `dashboard.py` are placeholders → set after Phase-0 baseline + LB audit
+  (FLOOR = redshift-only BAL-ACC; TARGET = top-50 public-LB BAL-ACC).
+- Add per-class threshold/decision tuning for balanced accuracy (rare-class recall) once
+  the first GBDT exists — argmax is not optimal under balanced accuracy.
 - synth-decoder GitHub remote: confirm it's pushed before the bootstrap clones it.

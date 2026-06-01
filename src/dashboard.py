@@ -27,9 +27,9 @@ from pathlib import Path
 
 from .config import METRIC, REPORTS, ROOT
 
-# --- ascent anchors (update after Phase 0) ---------------------------------
-FLOOR = 0.950    # redshift-only baseline guess — REPLACE with measured value
-TARGET = 0.980   # top-50 LB bar — REPLACE after LB audit
+# --- ascent anchors (balanced accuracy; update after Phase 0) ---------------
+FLOOR = 0.950    # redshift-only BAL-ACC baseline guess — REPLACE with measured value
+TARGET = 0.980   # top-50 LB balanced accuracy — REPLACE after LB audit
 HIGHER_BETTER = True
 
 try:

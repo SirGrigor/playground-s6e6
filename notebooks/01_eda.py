@@ -82,9 +82,12 @@ def redshift_baseline(train: pd.DataFrame):
     qso_k = CLASSES.index("QSO")
     proba[:, qso_k] = np.clip(z / (z.max() + 1e-9), 0, 1)
     proba = proba / proba.sum(axis=1, keepdims=True).clip(1e-9)
-    acc = float((pred == train[TARGET].to_numpy()).mean())
-    print(f"[baseline] redshift 3-bin rule accuracy = {acc:.4f}  → set this as dashboard FLOOR")
-    return train[TARGET].to_numpy(), pred, proba, acc
+    from src.metrics import competition_score
+    y = train[TARGET].to_numpy()
+    bal = competition_score(y, pred)
+    acc = float((pred == y).mean())
+    print(f"[baseline] redshift 3-bin rule: BAL-ACC={bal:.4f} (metric) acc={acc:.4f}  → set BAL-ACC as dashboard FLOOR")
+    return y, pred, proba, bal
 
 
 def main() -> None:

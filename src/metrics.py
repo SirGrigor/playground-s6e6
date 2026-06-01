@@ -24,6 +24,17 @@ import numpy as np
 from .config import CLASSES
 
 
+def competition_score(y_true, y_pred) -> float:
+    """THE competition metric — balanced accuracy (macro-avg per-class recall).
+
+    Single source of truth: every CV fold, holdout eval, and blend objective must score
+    through here so we optimize the real target, not plain accuracy. Takes LABELS (the
+    submission is labels), so models must argmax (or threshold-tune) to labels first.
+    """
+    from sklearn.metrics import balanced_accuracy_score
+    return float(balanced_accuracy_score(y_true, y_pred))
+
+
 def multiclass_auc_report(y_true, proba, *, labels=None, headline: str = "ovo_macro") -> dict:
     """Compute OvR + OvO multiclass AUC every way, plus one scalar headline.
 

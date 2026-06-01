@@ -157,7 +157,8 @@ def pr_panel(y_true, proba, *, labels=None, prefix="model"):
 def classification_report_panel(y_true, y_pred, *, labels=None, prefix="model"):
     """Per-class precision/recall/F1 heatmap + accuracy & macro/weighted F1 in the title."""
     import matplotlib.pyplot as plt
-    from sklearn.metrics import accuracy_score, classification_report, f1_score
+    from sklearn.metrics import (accuracy_score, balanced_accuracy_score,
+                                 classification_report, f1_score)
 
     classes = _classes(labels)
     rep = classification_report(y_true, y_pred, labels=classes, output_dict=True, zero_division=0)
@@ -171,10 +172,11 @@ def classification_report_panel(y_true, y_pred, *, labels=None, prefix="model"):
     for i in range(len(classes)):
         for j in range(len(metrics)):
             ax.text(j, i, f"{mat[i, j]:.4f}", ha="center", va="center", fontsize=10)
+    # Balanced accuracy = mean of the per-class RECALL column → THE competition metric.
+    bal = balanced_accuracy_score(y_true, y_pred)
     acc = accuracy_score(y_true, y_pred)
     macro = f1_score(y_true, y_pred, average="macro", labels=classes, zero_division=0)
-    weighted = f1_score(y_true, y_pred, average="weighted", labels=classes, zero_division=0)
-    ax.set_title(f"{prefix} — accuracy {acc:.4f} | macro-F1 {macro:.4f} | weighted-F1 {weighted:.4f}",
+    ax.set_title(f"{prefix} — BAL-ACC {bal:.4f} (metric) | acc {acc:.4f} | macro-F1 {macro:.4f}",
                  fontsize=10, fontweight="bold")
     plt.colorbar(im, ax=ax, shrink=0.8, label="score")
     return _save(fig, _figpath(prefix, "report"))

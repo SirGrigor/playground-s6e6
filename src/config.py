@@ -31,8 +31,12 @@ HOLDOUT_FRAC = 0.20
 # Problem definition --------------------------------------------------------
 TARGET = "class"
 ID = "id"
-METRIC = "accuracy"                   # VERIFY on /evaluation tab (vs macro-F1 / logloss)
-GREATER_IS_BETTER = True              # accuracy/F1 → True; logloss → flip to False
+# CONFIRMED 2026-06-01 on /evaluation: balanced accuracy (macro-avg per-class recall).
+# Submission is LABELS (id,class), not probabilities. Deadline 2026-06-30.
+# Implication: rare classes (STAR, QSO) weigh equally → per-class recall balance and
+# decision-threshold tuning matter more than raw accuracy. GALAXY↔QSO cell is the crux.
+METRIC = "balanced_accuracy"
+GREATER_IS_BETTER = True
 TASK = "multiclass"
 CLASSES = ["GALAXY", "STAR", "QSO"]   # SDSS17 label set; confirm exact strings in train.csv
 N_CLASSES = 3
