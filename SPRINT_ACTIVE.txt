@@ -2,10 +2,10 @@
 # ACTIVE script — the one thing colab/bootstrap.py runs. One line, no '#'.
 # Switch experiment = edit this line + push, then re-run the Colab Run cell.
 #
-# CURRENT = v2 original-SDSS17 leak match (synth-decoder Phase 1). Adversarial
-# validation + fingerprint-match test/train to the original 100k → GATE (does the
-# recovered label beat the v1 model on matched rows?) → if USE, override matched rows.
-# THE KEY OUTPUT to read: [match] test coverage + [gate] verdict on REAL data.
-# (v1 baseline = notebooks/02_v1_lgb_baseline.py; Phase-0 recon = notebooks/01_eda.py)
+# CURRENT = v3 add spectral_type + galaxy_population (the Playground-added columns the
+# v2 recon found v1 was silently dropping). EDA prints their per-class distribution +
+# nullity (read [eda:*]), then retrains LGBM with them as native categoricals.
+# THE KEY OUTPUT: [eda:*] structure + v3 — RESULT holdout vs v1 0.9655 / v2 0.9639.
+# (v2 leak=03; v1 baseline=02; recon=01 — leak was 0% coverage, dead end.)
 # ============================================================================
-notebooks/03_v2_leak_match.py
+notebooks/04_v3_extra_features.py

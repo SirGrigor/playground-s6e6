@@ -46,6 +46,10 @@ N_CLASSES = 3
 PHOTOMETRIC_BANDS = ["u", "g", "r", "i", "z"]        # magnitudes
 STRONG_NUMERIC = ["redshift"]
 COORD_COLS = ["alpha", "delta"]                       # RA / Dec
+# PLAYGROUND-ADDED columns (NOT in the SDSS17 original) — discovered in the v2 recon
+# (2026-06-01). Almost certainly high-signal: a stellar spectral type implies STAR, a
+# galaxy population implies GALAXY. v1 silently dropped these — v3 uses them.
+EXTRA_COLS = ["spectral_type", "galaxy_population"]
 # Survey identifiers — mostly junk, but plate/MJD/fiber can leak via spectroscopy
 # observation structure. rerun_ID is constant (=301) in the original.
 ID_LIKE_COLS = ["obj_ID", "run_ID", "rerun_ID", "cam_col", "field_ID",

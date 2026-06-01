@@ -60,4 +60,11 @@ def synthetic_fallback(n: int = 6000, seed: int = 0) -> pd.DataFrame:
         df[b] = rng.normal(base[b], 1.5, n) + (y == "QSO") * rng.normal(0.5, 0.3, n)
     for c in ("alpha", "delta"):
         df[c] = rng.uniform(0, 360, n) if c == "alpha" else rng.uniform(-20, 80, n)
-    return pd.DataFrame(df)
+    out = pd.DataFrame(df)
+    # Playground-added extras: stellar spectral type (stars only), galaxy population
+    # (galaxies only) — class-dependent nulls mimic the likely real structure (strong signal).
+    spec = np.where(out[TARGET] == "STAR", rng.choice(list("OBAFGKM"), n), None)
+    pop = np.where(out[TARGET] == "GALAXY", rng.choice(["STARFORMING", "STARBURST", "AGN"], n), None)
+    out["spectral_type"] = pd.array(spec, dtype="string")
+    out["galaxy_population"] = pd.array(pop, dtype="string")
+    return out
