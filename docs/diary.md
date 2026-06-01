@@ -9,6 +9,7 @@ Metric: **balanced_accuracy**. Source of truth: `experiments.jsonl` (git-tracked
 | [v1](versions/v1.md) | `—` | +0.00000 | — | 0.96548 | 0.96483 | +0.00065 | LGBM on redshift+bands+colors with class-balanced weights and OOF-t... | ⚠ multiple_changes |
 | [v2](versions/v2.md) | `v1` | +0.00300 | -0.00155 | 0.96393 | 0.96304 | +0.00089 | Matching test/train to original SDSS17 on phot+z@6 recovers true la... | ⚠ silent_regression, prediction_sign_mismatch, multiple_changes |
 | [v3](versions/v3.md) | `v1` | +0.00500 | +0.00022 | 0.96570 | 0.96495 | +0.00074 | Adding spectral_type + galaxy_population (LGBM-native categorical) ... | ⚠ prediction_undershot, multiple_changes |
+| [v4](versions/v4.md) | `v3` | +0.00000 | -0.00143 | 0.96427 | 0.96331 | +0.00095 | DIAGNOSTIC: are the ~0.9655 plateau errors structured (feature patt... | ⚠ silent_regression |
 
 ## Read more
 - Per-version write-ups: `docs/versions/<vN>.md`
