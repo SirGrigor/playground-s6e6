@@ -2,9 +2,10 @@
 # ACTIVE script — the one thing colab/bootstrap.py runs. One line, no '#'.
 # Switch experiment = edit this line + push, then re-run the Colab Run cell.
 #
-# CURRENT = v1 LGBM baseline. Features (redshift+bands+colors), StratifiedKFold(5)
-# OOF on a dev set + sacred 20% holdout, class_weight=balanced, per-class decision-
-# weight tuning for balanced accuracy, full viz + dashboard + submission.
-# (Phase-0 recon is notebooks/01_eda.py — run that first if you want the recon figs.)
+# CURRENT = v2 original-SDSS17 leak match (synth-decoder Phase 1). Adversarial
+# validation + fingerprint-match test/train to the original 100k → GATE (does the
+# recovered label beat the v1 model on matched rows?) → if USE, override matched rows.
+# THE KEY OUTPUT to read: [match] test coverage + [gate] verdict on REAL data.
+# (v1 baseline = notebooks/02_v1_lgb_baseline.py; Phase-0 recon = notebooks/01_eda.py)
 # ============================================================================
-notebooks/02_v1_lgb_baseline.py
+notebooks/03_v2_leak_match.py

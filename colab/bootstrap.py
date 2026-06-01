@@ -137,7 +137,13 @@ def pull_artifacts() -> None:
 def run_script() -> None:
     script = active_script()
     print(f"[5] RUN  {script}  (PYTHONPATH=repo root + vendored toolkits)")
-    vendor_paths = [str(ROOT / "vendor" / sub) for _, sub in VENDOR]
+    # add both repo root and its src/ (synth-decoder is a src-layout package → import synth_decoder)
+    vendor_paths = []
+    for _, sub in VENDOR:
+        base = ROOT / "vendor" / sub
+        vendor_paths.append(str(base))
+        if (base / "src").is_dir():
+            vendor_paths.append(str(base / "src"))
     pythonpath = os.pathsep.join([str(ROOT), *vendor_paths, os.environ.get("PYTHONPATH", "")])
     if DRY:
         print(f"  $ PYTHONPATH={pythonpath} python {script}"); return
