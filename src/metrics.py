@@ -35,6 +35,45 @@ def competition_score(y_true, y_pred) -> float:
     return float(balanced_accuracy_score(y_true, y_pred))
 
 
+def weighted_predict(proba, weights, *, labels=None):
+    """Decision rule for balanced accuracy: argmax over class-WEIGHTED probabilities.
+
+    Under balanced accuracy, plain argmax is suboptimal — up-weighting rare classes
+    recovers their recall. `weights` is a per-class multiplier aligned to CLASSES.
+    """
+    classes = list(labels) if labels is not None else list(CLASSES)
+    proba = np.asarray(proba, dtype=float)
+    w = np.asarray(weights, dtype=float)
+    idx = np.argmax(proba * w[None, :], axis=1)
+    return np.asarray(classes)[idx]
+
+
+def tune_class_weights(proba, y_true, *, labels=None, rounds: int = 3, grid: int = 25):
+    """Coordinate-ascent search for per-class weights that maximize balanced accuracy.
+
+    Tune on OOF probabilities, then apply the SAME weights to holdout/test (honest: OOF
+    is out-of-fold). Class 0's weight is pinned to 1 (the rule is scale-invariant), the
+    rest are searched on a log grid, refined over `rounds`. Returns (weights, best_score).
+    """
+    classes = list(labels) if labels is not None else list(CLASSES)
+    proba = np.asarray(proba, dtype=float)
+    y_true = np.asarray(y_true)
+    n = len(classes)
+    w = np.ones(n)
+    best = competition_score(y_true, weighted_predict(proba, w, labels=classes))
+    span = 1.0  # search ±1 decade initially, shrink each round
+    for _ in range(rounds):
+        for k in range(1, n):  # pin class 0 at 1.0
+            cands = np.exp(np.linspace(-span, span, grid)) * w[k]
+            for cand in cands:
+                trial = w.copy(); trial[k] = cand
+                s = competition_score(y_true, weighted_predict(proba, trial, labels=classes))
+                if s > best:
+                    best, w = s, trial
+        span *= 0.5
+    return w, float(best)
+
+
 def multiclass_auc_report(y_true, proba, *, labels=None, headline: str = "ovo_macro") -> dict:
     """Compute OvR + OvO multiclass AUC every way, plus one scalar headline.
 
