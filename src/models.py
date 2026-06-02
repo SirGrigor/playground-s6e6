@@ -120,8 +120,9 @@ def nn_oof(Xdev, ydev, Xhold, Xte, n_folds: int = N_FOLDS, on_fold=None):
     return oof, hold, test, fold_va
 
 
-def xgb_oof(Xdev, ydev, Xhold, Xte, n_folds: int = N_FOLDS, on_fold=None):
-    """XGBoost OOF (natural distribution). enable_categorical uses pandas category dtype."""
+def xgb_oof(Xdev, ydev, Xhold, Xte, n_folds: int = N_FOLDS, on_fold=None, seed: int = MODEL_SEED):
+    """XGBoost OOF (natural distribution). enable_categorical uses pandas category dtype.
+    `seed` varies the model RNG (folds stay fixed) for seed-bagging."""
     import xgboost as xgb
     oof = np.zeros((len(Xdev), len(CLASSES)))
     hold = np.zeros((len(Xhold), len(CLASSES)))
@@ -134,7 +135,7 @@ def xgb_oof(Xdev, ydev, Xhold, Xte, n_folds: int = N_FOLDS, on_fold=None):
                               n_estimators=2000, learning_rate=0.05, max_depth=8, subsample=0.8,
                               colsample_bytree=0.8, reg_lambda=1.0, tree_method="hist",
                               enable_categorical=True, eval_metric="mlogloss",
-                              early_stopping_rounds=100, random_state=MODEL_SEED, n_jobs=-1)
+                              early_stopping_rounds=100, random_state=seed, n_jobs=-1)
         m.fit(Xdev.iloc[tr], np.asarray(ydev)[tr],
               eval_set=[(Xdev.iloc[va], np.asarray(ydev)[va])], verbose=False)
         oof[va] = m.predict_proba(Xdev.iloc[va])
