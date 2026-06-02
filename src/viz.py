@@ -261,6 +261,62 @@ def ovo_auc_panel(y_true, proba, *, labels=None, prefix="model"):
 
 
 @_safe
+def calibration_panel(y_true, proba, *, labels=None, prefix="model", n_bins=10):
+    """Reliability diagram (one-vs-rest per class) — predicted prob vs observed frequency.
+
+    The classification analog of actual-vs-predicted. Diagonal = perfectly calibrated.
+    Understanding-oriented: balanced accuracy is a DECISION metric, so deviation here does
+    not directly cost score — it shows how far threshold tuning pushed us off calibration.
+    """
+    import matplotlib.pyplot as plt
+    from sklearn.calibration import calibration_curve
+    from sklearn.preprocessing import label_binarize
+
+    classes = _classes(labels)
+    proba = np.asarray(proba, dtype=float)
+    Y = label_binarize(y_true, classes=classes)
+    fig, ax = plt.subplots(figsize=(6.5, 6))
+    ax.plot([0, 1], [0, 1], ls=":", color="grey", lw=1, label="perfect")
+    for k, cls in enumerate(classes):
+        if Y[:, k].min() == Y[:, k].max():
+            continue
+        frac_pos, mean_pred = calibration_curve(Y[:, k], proba[:, k], n_bins=n_bins, strategy="quantile")
+        ax.plot(mean_pred, frac_pos, "o-", color=CLASS_COLORS.get(cls), lw=2, label=cls)
+    ax.set_xlabel("mean predicted P(class)"); ax.set_ylabel("observed frequency")
+    ax.set_title(f"{prefix} — calibration (reliability) per class")
+    ax.legend(loc="upper left", fontsize=9)
+    return _save(fig, _figpath(prefix, "calibration"))
+
+
+@_safe
+def proba_distribution_panel(y_true, proba, *, labels=None, prefix="model", bins=50):
+    """Per-class P(class) distribution split by true=class vs true≠class.
+
+    The genuinely diagnostic 'actual vs predicted' view: the overlap between the two
+    distributions IS the irreducible confusion. For STAR/GALAXY the overlap region is where
+    our errors live — visualizes whether the boundary is separable or fused (v4 said fused).
+    """
+    import matplotlib.pyplot as plt
+
+    classes = _classes(labels)
+    y_true = np.asarray(y_true)
+    proba = np.asarray(proba, dtype=float)
+    fig, axes = plt.subplots(1, len(classes), figsize=(5 * len(classes), 4.2), sharey=False)
+    if len(classes) == 1:
+        axes = [axes]
+    edges = np.linspace(0, 1, bins + 1)
+    for k, (ax, cls) in enumerate(zip(axes, classes)):
+        pos = proba[y_true == cls, k]
+        neg = proba[y_true != cls, k]
+        ax.hist(neg, bins=edges, density=True, alpha=0.5, color="#bbbbbb", label=f"true≠{cls}")
+        ax.hist(pos, bins=edges, density=True, alpha=0.6, color=CLASS_COLORS.get(cls), label=f"true={cls}")
+        ax.set_xlabel(f"P({cls})"); ax.set_title(cls, color=CLASS_COLORS.get(cls), fontweight="bold")
+        ax.legend(fontsize=8)
+    fig.suptitle(f"{prefix} — predicted P(class) by true label (overlap = confusion)", fontweight="bold")
+    return _save(fig, _figpath(prefix, "proba_dist"))
+
+
+@_safe
 def proba_rho_matrix(probas: dict[str, np.ndarray], *, klass_index=0, prefix="pool"):
     """Rank-correlation heatmap between models' P(class) vectors — ensemble diversity.
 
@@ -302,6 +358,8 @@ def render_all_panels(y_true, y_pred, proba, *, labels=None, fold_scores=None, p
         ("roc", lambda: roc_panel(y_true, proba, labels=labels, prefix=prefix)),
         ("ovo_auc", lambda: ovo_auc_panel(y_true, proba, labels=labels, prefix=prefix)),
         ("pr", lambda: pr_panel(y_true, proba, labels=labels, prefix=prefix)),
+        ("proba_dist", lambda: proba_distribution_panel(y_true, proba, labels=labels, prefix=prefix)),
+        ("calibration", lambda: calibration_panel(y_true, proba, labels=labels, prefix=prefix)),
         ("class_balance", lambda: class_balance_panel(y_true, y_pred, labels=labels, prefix=prefix)),
     ]
     if fold_scores:
