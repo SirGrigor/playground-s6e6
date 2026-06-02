@@ -14,6 +14,7 @@ Metric: **balanced_accuracy**. Source of truth: `experiments.jsonl` (git-tracked
 | [v6](versions/v6.md) | `v5` | +0.00100 | +0.00031 | 0.96606 | 0.96541 | +0.00064 | A decorrelated CatBoost+XGBoost+LGBM ensemble lifts the probabiliti... | ⚠ prediction_undershot, multiple_changes |
 | [v7](versions/v7.md) | `v6` | +0.00100 | +0.00000 | 0.96606 | 0.96541 | +0.00064 | A RealMLP neural net decorrelates from the GBDTs (ρ<0.95), so a GBD... | ⚠ multiple_changes |
 | [v8](versions/v8.md) | `v6` | +0.00030 | -0.00045 | 0.96561 | 0.96519 | +0.00042 | Seed-bagging LGBM+XGB (×3) + Caruana selection reduces variance for... | ⚠ prediction_sign_mismatch, multiple_changes |
+| [v9](versions/v9.md) | `v8` | +0.00000 | -0.00134 | 0.96427 | 0.96331 | +0.00095 | DIAGNOSTIC: is 0.9664 the data's irreducible floor? cleanlab label-... | ⚠ silent_regression |
 
 ## Read more
 - Per-version write-ups: `docs/versions/<vN>.md`
