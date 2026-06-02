@@ -1,9 +1,7 @@
 # ============================================================================
-# CURRENT = v10 TabICLv2 (foundation model) + GBDT ensemble. v9 verdict DIVERGENT:
-# ceiling ≈ 0.9% hard label noise + ~2.4% genuine GALAXY↔STAR overlap (not pure noise).
-# TabICLv2 = the last real lever — strong AND decorrelated non-GBDT. Trains LGBM+XGB+TabICL,
-# reports ρ + ensemble vs 0.9664. Modest expectation (+0.001-0.002 if it separates overlap).
-# THE KEY OUTPUT: [tabicl] holdout (competitive ~0.965?) + [rho] tabicl~gbdt (<0.9?) + v10 RESULT.
-# Submit v10_tabicl_ensemble.csv if it lifts. (v9 ceiling=10; v8=09; v7=08; ... v1=02.)
+# S6E6 COMPLETE. Best = v8_final2_meanbag.csv (LB 0.96641). 0.9664 PROVEN as the practical
+# ceiling: v9 (label-noise 0.9% + overlap 2.4%) + v7 NN + v10 TabICLv2 (both decorrelated but
+# too weak → 0 ensemble weight). 2 locked finals: meanbag (anchor) + v8_final1_caruana (hedge).
+# To re-run the winning consolidation: notebooks/09_v8_consolidation.py
 # ============================================================================
-notebooks/11_v10_tabicl.py
+notebooks/09_v8_consolidation.py

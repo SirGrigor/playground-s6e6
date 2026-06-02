@@ -186,9 +186,12 @@ def push_diary_to_git() -> None:
     subprocess.run([sys.executable, "-m", "src.diary", "render"], cwd=str(ROOT), env=env, check=False)
     for c in ('git config user.email "colab@s6e6.bootstrap"',
               'git config user.name "s6e6-colab-bootstrap"',
-              "git add experiments.jsonl docs/diary.md 2>/dev/null",
+              "git add experiments.jsonl docs/diary.md docs/versions 2>/dev/null",
               'git diff --cached --quiet || git commit -q -m "diary: Colab run"',
-              "git pull --rebase -q origin master 2>/dev/null || git pull --rebase -q origin main"):
+              # stash any other run-dirtied tracked files so the rebase can't abort (v10 log lesson)
+              "git stash -q 2>/dev/null || true",
+              "git pull --rebase -q origin master 2>/dev/null || git pull --rebase -q origin main 2>/dev/null || true",
+              "git stash pop -q 2>/dev/null || true"):
         subprocess.run(c, shell=True, cwd=str(ROOT), check=False)
     r = subprocess.run(["git", "push", "-q", f"https://{token}@github.com/{GH_REPO}.git", "HEAD"],
                        cwd=str(ROOT), capture_output=True, text=True)
