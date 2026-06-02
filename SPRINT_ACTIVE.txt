@@ -1,10 +1,10 @@
 # ============================================================================
-# CURRENT = v8 ENDGAME CONSOLIDATION. 0.9662 is an exhaustively-demonstrated ceiling
-# (v2-v7: leak/features/decision-rule/GBDT-diversity/NN all spent). Seed-bag LGBM+XGB ×3
-# → Caruana greedy selection (overfit-resistant) → lock 2 final subs with DIFFERENT
-# failure modes: #1 Caruana blend (CV anchor), #2 equal-mean bag (un-optimized risk pick).
-# THE KEY OUTPUT: [caruana] weights + FINAL SELECTION #1/#2 holdout vs 0.9662.
-# Writes v8_final1_caruana.csv + v8_final2_meanbag.csv → submit BOTH as the 2 finals.
-# (v7 NN=08; v6 zoo=07; v5=06; v4=05; v3=04; v2=03; v1=02.)
+# CURRENT = v9 CEILING DIAGNOSTIC (run FIRST). Settles whether 0.9664 is the data's
+# irreducible floor: cleanlab confident-learning (label-noise rate + noise matrix from
+# our OOF) + kNN Bayes-error (feature-space overlap floor) + error-confidence split.
+# THE KEY OUTPUT: the CEILING VERDICT line — err rate vs cleanlab-noise vs kNN-Bayes;
+# CONVERGE = data's floor (stop), DIVERGENT = resolvable structure (run v10).
+# NEXT = notebooks/11_v10_tabicl.py (TabICLv2 foundation model + GBDT ensemble) IF divergent.
+# (v8 consolidation=09; v7 NN=08; v6 zoo=07; v5=06; v4=05; v3=04; v2=03; v1=02.)
 # ============================================================================
-notebooks/09_v8_consolidation.py
+notebooks/10_v9_ceiling.py

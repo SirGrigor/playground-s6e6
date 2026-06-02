@@ -33,6 +33,8 @@ ORIGINAL_DATASET = "fedesoriano/stellar-classification-dataset-sdss17"
 DEPS = ["numpy", "pandas", "scipy", "scikit-learn", "pyarrow",
         "lightgbm", "xgboost", "catboost",
         "pytabkit", "torch",          # v7 RealMLP (neural net) — Colab has torch+GPU preinstalled
+        "cleanlab",                    # v9 confident-learning (label-noise / ceiling diagnostic)
+        "tabicl",                      # v10 TabICLv2 tabular foundation model (auto-downloads ckpt)
         "matplotlib", "seaborn", "rich", "joblib"]
 ARTIFACT_DIRS = ("probs", "submissions", "reports")
 # Our own toolkits — fresh-cloned, NOT pip'd. (repo_url, vendor_subdir)
