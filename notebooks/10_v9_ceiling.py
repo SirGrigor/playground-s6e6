@@ -65,10 +65,8 @@ def main() -> None:
     # 1. label noise (cleanlab)
     txt_noise, noise_rate = label_noise_report(ydev, oof, CLASSES)
     print(txt_noise)
-    # 2. Bayes floor (kNN on numeric features)
-    num_cols = [c for c in [*PHOTOMETRIC_BANDS, "redshift", *COORD_COLS,
-                            "u_g", "g_r", "r_i", "i_z"] if c in Xdev.columns]
-    txt_bayes, bayes = knn_bayes_error(Xdev[num_cols], ydev)
+    # 2. Bayes floor (kNN on the FULL feature space — numeric + one-hot cats)
+    txt_bayes, bayes = knn_bayes_error(Xdev, ydev)
     print(txt_bayes)
     # 3. confidence split
     txt_conf = error_confidence_report(ydev, oof)

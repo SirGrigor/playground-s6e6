@@ -97,20 +97,33 @@ def label_noise_report(y_int, pred_probs, classes: list[str]) -> tuple[str, floa
     return "\n".join(lines), rate
 
 
-def knn_bayes_error(X_num: pd.DataFrame, y_int, k: int = 10, sample: int = 50000,
+def knn_bayes_error(X: pd.DataFrame, y_int, k: int = 10, sample: int = 50000,
                     seed: int = 42) -> tuple[str, float]:
     """kNN local label-disagreement = an estimate of the irreducible Bayes-error floor.
 
-    Fraction of each point's k nearest neighbours (in standardized numeric feature space) with
-    a different label. If ≈ our error rate, 0.9664 is the feature-space overlap floor.
+    Fraction of each point's k nearest neighbours with a different label. MUST use the FULL
+    feature space (numeric + one-hot categoricals) — a numeric-only space handicaps the floor
+    and makes it an overestimate (v9 lesson 2026-06-02). If ≈ our error rate, the classes
+    genuinely overlap and 0.9664 is near the feature-space floor.
     """
     from sklearn.neighbors import NearestNeighbors
     from sklearn.preprocessing import StandardScaler
 
+    # one-hot categoricals so the floor reflects ALL features the model sees
+    cat = [c for c in X.columns if str(X[c].dtype) == "category"]
+    num = [c for c in X.columns if c not in cat]
+    Xn = X[num].astype(float)
+    Xn = Xn.fillna(Xn.median())
+    if cat:
+        Xc = pd.get_dummies(X[cat].astype("string").fillna("NA"), dummy_na=False).astype(float)
+        Xfull = pd.concat([Xn, Xc], axis=1)
+    else:
+        Xfull = Xn
+
     y = np.asarray(y_int)
     rng = np.random.default_rng(seed)
     idx = rng.choice(len(y), size=min(sample, len(y)), replace=False)
-    Xs = StandardScaler().fit_transform(X_num.iloc[idx].fillna(X_num.median()).to_numpy())
+    Xs = StandardScaler().fit_transform(Xfull.iloc[idx].to_numpy())
     ys = y[idx]
     nn = NearestNeighbors(n_neighbors=k + 1).fit(Xs)
     _, nbr = nn.kneighbors(Xs)

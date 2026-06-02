@@ -1,10 +1,9 @@
 # ============================================================================
-# CURRENT = v9 CEILING DIAGNOSTIC (run FIRST). Settles whether 0.9664 is the data's
-# irreducible floor: cleanlab confident-learning (label-noise rate + noise matrix from
-# our OOF) + kNN Bayes-error (feature-space overlap floor) + error-confidence split.
-# THE KEY OUTPUT: the CEILING VERDICT line — err rate vs cleanlab-noise vs kNN-Bayes;
-# CONVERGE = data's floor (stop), DIVERGENT = resolvable structure (run v10).
-# NEXT = notebooks/11_v10_tabicl.py (TabICLv2 foundation model + GBDT ensemble) IF divergent.
-# (v8 consolidation=09; v7 NN=08; v6 zoo=07; v5=06; v4=05; v3=04; v2=03; v1=02.)
+# CURRENT = v10 TabICLv2 (foundation model) + GBDT ensemble. v9 verdict DIVERGENT:
+# ceiling ≈ 0.9% hard label noise + ~2.4% genuine GALAXY↔STAR overlap (not pure noise).
+# TabICLv2 = the last real lever — strong AND decorrelated non-GBDT. Trains LGBM+XGB+TabICL,
+# reports ρ + ensemble vs 0.9664. Modest expectation (+0.001-0.002 if it separates overlap).
+# THE KEY OUTPUT: [tabicl] holdout (competitive ~0.965?) + [rho] tabicl~gbdt (<0.9?) + v10 RESULT.
+# Submit v10_tabicl_ensemble.csv if it lifts. (v9 ceiling=10; v8=09; v7=08; ... v1=02.)
 # ============================================================================
-notebooks/10_v9_ceiling.py
+notebooks/11_v10_tabicl.py
