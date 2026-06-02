@@ -12,6 +12,7 @@ Metric: **balanced_accuracy**. Source of truth: `experiments.jsonl` (git-tracked
 | [v4](versions/v4.md) | `v3` | +0.00000 | -0.00143 | 0.96427 | 0.96331 | +0.00095 | DIAGNOSTIC: are the ~0.9655 plateau errors structured (feature patt... | ⚠ silent_regression |
 | [v5](versions/v5.md) | `v3` | +0.00150 | +0.00005 | 0.96574 | 0.96526 | +0.00048 | Dropping class_weight='balanced' (calibrated natural probs) + direc... | ⚠ prediction_undershot, multiple_changes |
 | [v6](versions/v6.md) | `v5` | +0.00100 | +0.00031 | 0.96606 | 0.96541 | +0.00064 | A decorrelated CatBoost+XGBoost+LGBM ensemble lifts the probabiliti... | ⚠ prediction_undershot, multiple_changes |
+| [v7](versions/v7.md) | `v6` | +0.00100 | +0.00000 | 0.96606 | 0.96541 | +0.00064 | A RealMLP neural net decorrelates from the GBDTs (ρ<0.95), so a GBD... | ⚠ multiple_changes |
 
 ## Read more
 - Per-version write-ups: `docs/versions/<vN>.md`
