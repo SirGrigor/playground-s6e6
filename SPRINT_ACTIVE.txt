@@ -1,12 +1,11 @@
 # ============================================================================
-# v14 = REALMLP + RICH FEATURE ENGINEERING (2026-06-03). v13 showed our RealMLP recipe works
-# (+0.0023 over v7) but loses to GBDT on bare features (0.9609 vs 0.9657); the +0.0073 to the public
-# 0.968 is Vladimir's FE. This adds it (src/fe_realmlp.py: ratios, numeric→categorical, KBins(delta),
-# crossed cats, per-class OOF target-encoded combos) and RACES lgb vs realmlp on identical folds:
-# (a) does FE close RealMLP to ~0.968, (b) does FE also lift the GBDT (→ ceiling breaks either way).
-# Verified locally: both train, RealMLP+FE learns (synthetic OOF 0.62→0.81→0.96 over epochs).
-# GPU REQUIRED (RealMLP × 5 folds w/ rich embeddings, ~30-40 min). FE-only; domain |b|/L = v15.
-#   v13 RealMLP-on-bare-features: notebooks/13_v13_realmlp.py.
-#   Locked finals unchanged: v8_final2_meanbag.csv (0.96641 anchor) + v8_final1_caruana (hedge).
+# v15 = SUPERVISED BLEND of lgb+FE & realmlp+FE (2026-06-03). v14 BROKE the ceiling: realmlp+FE 0.9690,
+# lgb+FE 0.9682, ρ=0.85 (decorrelated AND both strong) = textbook blend setup. Re-runs the deterministic
+# v14 race (reproduces both OOF+test — v14 only saved test), then fits 3 blends on the labeled dev OOF
+# (Caruana / LogReg-on-logits [Deotte's move] / mean), selects on the held-out holdout, writes v15_final.
+# Persists OOF (probs/v15_*_oof.npy) so future blends skip the re-run. Verified locally (all 3 blends run).
+# GPU REQUIRED (~25 min, re-runs the RealMLP race). Target: clear 0.9700.
+#   v14 race: notebooks/14_v14_realmlp_fe.py | v13 bare RealMLP: notebooks/13_v13_realmlp.py.
+#   NOTE: v14 results SUPERSEDE the old locked finals (0.96641) — re-pick finals around v14/v15.
 # ============================================================================
-notebooks/14_v14_realmlp_fe.py
+notebooks/15_v15_blend.py
