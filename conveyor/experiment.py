@@ -25,15 +25,17 @@ import time
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 # repo root on sys.path whether run from /kaggle/working/<repo> or the repo dir
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from src import data  # noqa: E402
-from src.config import CLASSES, TARGET  # noqa: E402
+from src.config import CLASSES, ID, TARGET  # noqa: E402
 from src.fe_realmlp import build_rich_features, race_oof  # noqa: E402
 from src.metrics import competition_score, tune_class_weights, weighted_predict  # noqa: E402
+from src.stacker import cv_logreg_stack  # noqa: E402
 
 CLS2INT = {c: i for i, c in enumerate(CLASSES)}
 INT2CLS = np.asarray(CLASSES)
@@ -74,21 +76,39 @@ def run(config: dict) -> dict:
                  n_folds=int(config.get("n_folds", 5)),
                  cfg=config.get("rm_cfg", {}),
                  with_cat=bool(config.get("with_cat", False)),
+                 with_tabm=bool(config.get("with_tabm", False)),
+                 tabm_cfg=config.get("tabm_cfg"),
                  rm_seeds=config.get("rm_seeds"))
 
+    legs = ["lgb", "rm"] + (["tabm"] if config.get("with_tabm") else []) + (["cat"] if config.get("with_cat") else [])
     result = {"id": config.get("id"), "kind": config.get("kind", "realmlp_race"),
-              "config": config, "synthetic": synthetic, "n_features": int(Xrich.shape[1])}
-    for name in (["lgb", "rm"] + (["cat"] if config.get("with_cat") else [])):
+              "config": config, "synthetic": synthetic, "n_features": int(Xrich.shape[1]), "legs": legs}
+    for name in legs:
         w, s_oof = tune_class_weights(R[f"{name}_oof"], ydev, labels=INTS)
         s_hold = competition_score(yhold_names, weighted_predict(R[f"{name}_hold"], w, labels=CLASSES))
         result[f"{name}_oof"] = round(s_oof, 5)
         result[f"{name}_holdout"] = round(s_hold, 5)
         print(f"[{name}] OOF {s_oof:.5f} | holdout {s_hold:.5f}")
-    result["runtime_sec"] = round(time.time() - t0, 1)
 
-    out = Path("/kaggle/working/result.json")
-    out = out if out.parent.exists() else Path("result.json")
-    out.write_text(json.dumps(result))
+    # CV'd seed-bagged log-odds stacker (the v16-overfit fix) — the conveyor's headline number
+    out_dir = Path("/kaggle/working") if Path("/kaggle/working").exists() else Path(".")
+    if len(legs) >= 2:
+        oof_d = {l: R[f"{l}_oof"] for l in legs}
+        stack_oof, stacked, stack_cv = cv_logreg_stack(
+            oof_d, ydev, {"hold": {l: R[f"{l}_hold"] for l in legs}, "test": {l: R[f"{l}_test"] for l in legs}})
+        sw, _ = tune_class_weights(stack_oof, ydev, labels=INTS)
+        stack_hold = competition_score(yhold_names, weighted_predict(stacked["hold"], sw, labels=CLASSES))
+        result["stack_cv"] = round(stack_cv, 5)
+        result["stack_holdout"] = round(stack_hold, 5)
+        print(f"[stack] CV {stack_cv:.5f} | holdout {stack_hold:.5f}  (legs={legs})")
+        # write the stacked submission + persist OOFs (for re-blends without re-running)
+        sub = pd.DataFrame({ID: test[ID], TARGET: weighted_predict(stacked["test"], sw, labels=CLASSES)})
+        sub.to_csv(out_dir / "submission.csv", index=False)
+        for l in legs:
+            np.save(out_dir / f"oof_{l}.npy", R[f"{l}_oof"]); np.save(out_dir / f"test_{l}.npy", R[f"{l}_test"])
+
+    result["runtime_sec"] = round(time.time() - t0, 1)
+    (out_dir / "result.json").write_text(json.dumps(result))
     print("RESULT_JSON", json.dumps(result))
     return result
 

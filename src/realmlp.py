@@ -43,12 +43,19 @@ DEFAULT_CFG = {
     "grad_clip": 1.0, "class_weight_power": 0.0, "loss_prior_power": 1.075,
     "ls_eps": 0.04, "ls_eps_sched": "cos", "tfms": ["median_center", "robust_scale"],
     "epochs": 6, "train_bs": 256, "eval_bs": 10240, "ema_decay": 0.99775, "seed": MODEL_SEED,
+    "arch": "realmlp",   # "realmlp" (NTP independent-weight ensemble) | "tabm" (shared weight + rank-1 scalings)
 }
+
+# TabM (Don @donmarch14 recipe): parameter-efficient ensemble → n_ens=32 cheap, wider, dropout=0
+# (the rank-1 scalings regularize), SiLU. Architecturally DECORRELATED from RealMLP — the diversity leg.
+TABM_CFG = {**DEFAULT_CFG, "arch": "tabm", "n_ens": 32, "hidden_dims": [1024, 512, 512],
+            "dropout": 0.0, "p_drop_sched": "constant", "activation": "silu",
+            "pbld_freq_scale": 5.0, "pbld_lr_factor": 0.093}
 
 
 def _act(name):
     import torch.nn as nn
-    return {"gelu": nn.GELU, "prelu": nn.PReLU, "relu": nn.ReLU}[name]
+    return {"gelu": nn.GELU, "prelu": nn.PReLU, "relu": nn.ReLU, "silu": nn.SiLU}[name]
 
 
 def _schedule(init, progress, sched, flat_ratio=0.3):
@@ -136,6 +143,26 @@ def _build_modules():
             x = torch.einsum("bki,kio->bko", x, self.weight) / math.sqrt(self.in_features)
             return x + self.bias if self.bias is not None else x
 
+    class TabMLinear(nn.Module):
+        """TabM: parameter-efficient ensemble — ONE shared weight + per-member rank-1 scalings.
+        Decorrelates from NTPLinear (independent weights) → the diversity leg."""
+        def __init__(self, n_ens, in_features, out_features, bias=True):
+            super().__init__()
+            self.in_features = in_features
+            self.weight = nn.Parameter(torch.randn(in_features, out_features))      # SHARED
+            self.scale_in = nn.Parameter(torch.ones(n_ens, in_features))            # rank-1 per member
+            self.scale_out = nn.Parameter(torch.ones(n_ens, out_features))
+            self.bias = nn.Parameter(torch.randn(out_features)) if bias else None
+            self.bias_ens = nn.Parameter(torch.zeros(n_ens, out_features)) if bias else None
+
+        def forward(self, x):
+            x = x * self.scale_in.unsqueeze(0)
+            x = torch.einsum("bki,io->bko", x, self.weight) / math.sqrt(self.in_features)
+            x = x * self.scale_out.unsqueeze(0)
+            if self.bias is not None:
+                x = x + self.bias.view(1, 1, -1) + self.bias_ens.unsqueeze(0)
+            return x
+
     class RealMLPNet(nn.Module):
         def __init__(self, output_dim, cat_dims, n_numerical, cfg):
             super().__init__()
@@ -147,12 +174,13 @@ def _build_modules():
             cat_dim = sum(c if c <= cfg["onehot_thresh"] else cfg["embed_dim"] for c in cat_dims)
             total = num_dim + cat_dim
             act = _act(cfg["activation"])
+            Linear = TabMLinear if cfg.get("arch") == "tabm" else NTPLinear
             layers, self._drops = [], []
             if cfg["add_front_scale"]:
                 layers.append(ScalingLayer(self.n_ens, total))
             in_dim = total
             for i, h in enumerate(cfg["hidden_dims"]):
-                lin = NTPLinear(self.n_ens, in_dim, h)
+                lin = Linear(self.n_ens, in_dim, h)
                 if i == 0:
                     self.first_linear = lin
                 drop = nn.Dropout(cfg["dropout"])
@@ -160,7 +188,7 @@ def _build_modules():
                 layers += [lin, act(), drop]
                 in_dim = h
             self.hidden = nn.Sequential(*layers)
-            self.output_layer = NTPLinear(self.n_ens, in_dim, output_dim)
+            self.output_layer = Linear(self.n_ens, in_dim, output_dim)
 
         def forward(self, x_num, x_cat):
             x_num = self.num_embed(x_num.unsqueeze(1).expand(-1, self.n_ens, -1))
