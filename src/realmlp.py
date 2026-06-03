@@ -384,3 +384,38 @@ def realmlp_oof(Xdev: pd.DataFrame, ydev, Xhold: pd.DataFrame, Xte: pd.DataFrame
         test += predict(imp(Xn_te), Xc_te) / n_folds
         fold_va.append(va)
     return oof, hold, test, fold_va
+
+
+def _encode_frames(frames, cat_cols, num_cols):
+    """Encode a LIST of frames with a SHARED category vocabulary (so codes align across them).
+
+    cats → aligned int codes (NaN→0); numerics → float, NaN median-imputed from frames[0] (the
+    train frame). Returns (num_arrays, cat_arrays, cat_dims), parallel to `frames`."""
+    per_codes = [[] for _ in frames]
+    cat_dims = []
+    for c in cat_cols:
+        cats = pd.Index(sorted({v for f in frames for v in pd.Series(f[c]).dropna().unique()}))
+        for fi, f in enumerate(frames):
+            per_codes[fi].append(pd.Categorical(f[c], categories=cats).codes.astype("int64") + 1)
+        cat_dims.append(len(cats) + 1)
+    cat_arrays = [np.stack(cc, axis=1) if cc else np.zeros((len(frames[i]), 0), "int64")
+                  for i, cc in enumerate(per_codes)]
+    num_arrays = [f[num_cols].astype("float32").to_numpy() if num_cols else np.zeros((len(f), 0), "float32")
+                  for f in frames]
+    if num_cols:
+        med = np.nanmedian(num_arrays[0], axis=0)
+        num_arrays = [np.where(np.isnan(A), med[None, :], A).astype("float32") for A in num_arrays]
+    return num_arrays, cat_arrays, cat_dims
+
+
+def realmlp_fit_predict(X_tr, y_tr, X_val, y_val, evals: dict, cfg: dict | None = None):
+    """Train ONE RealMLP (n_ens internal bag); X_val drives best-epoch; predict X_val + each frame
+    in `evals`. Returns (val_proba, {name: proba}). For per-fold harnesses that inject fold-specific
+    features (e.g. target encoding) before training — the OOF folding is the caller's job."""
+    cfg = {**DEFAULT_CFG, **(cfg or {})}
+    cat_cols = [c for c in X_tr.columns if str(X_tr[c].dtype) == "category"]
+    num_cols = [c for c in X_tr.columns if c not in cat_cols]
+    keys = list(evals.keys())
+    nums, cats, cat_dims = _encode_frames([X_tr, X_val] + [evals[k] for k in keys], cat_cols, num_cols)
+    predict, _ = _fit_one(nums[0], cats[0], np.asarray(y_tr), nums[1], cats[1], np.asarray(y_val), cat_dims, cfg)
+    return predict(nums[1], cats[1]), {k: predict(nums[2 + i], cats[2 + i]) for i, k in enumerate(keys)}
