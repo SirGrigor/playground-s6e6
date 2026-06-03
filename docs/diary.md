@@ -21,6 +21,7 @@ Metric: **balanced_accuracy**. Source of truth: `experiments.jsonl` (git-tracked
 | [v14](versions/v14.md) | `v13` | +0.00500 | +0.00814 | 0.96901 | 0.96846 | +0.00055 | Vladimir's feature engineering (ratios, numeric→categorical, crosse... | ⚠ multiple_changes |
 | [v15](versions/v15.md) | `v14` | +0.00080 | +0.00039 | 0.96940 | 0.96893 | +0.00046 | A supervised blend of the decorrelated (ρ0.85) lgb+FE and realmlp+F... | ⚠ prediction_undershot |
 | [v16](versions/v16.md) | `v15` | +0.00040 | +0.00011 | 0.96951 | 0.96881 | +0.00070 | A 3rd algo-diverse leg (CatBoost+FE, native categoricals) adds enou... | ⚠ prediction_undershot, multiple_changes |
+| [v17](versions/v17.md) | `v15` | +0.00020 | +0.00001 | 0.96941 | 0.96879 | +0.00062 | Seed-bagging the RealMLP (×3) reduces its variance for a small LB g... | ⚠ prediction_undershot, multiple_changes |
 
 ## Read more
 - Per-version write-ups: `docs/versions/<vN>.md`
