@@ -33,3 +33,4 @@ releases.jsonl
 
 # keep split definitions, not the data itself
 !data/splits/
+conveyor/leaderboard.jsonl
