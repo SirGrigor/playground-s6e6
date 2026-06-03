@@ -33,7 +33,7 @@ sys.path.insert(0, str(ROOT))
 
 from src import data  # noqa: E402
 from src.config import CLASSES, ID, TARGET  # noqa: E402
-from src.fe_realmlp import build_rich_features, race_oof  # noqa: E402
+from src.fe_realmlp import build_rich_features, race_oof, single_oof  # noqa: E402
 from src.metrics import competition_score, tune_class_weights, weighted_predict  # noqa: E402
 from src.stacker import cv_logreg_stack  # noqa: E402
 
@@ -59,17 +59,50 @@ def _load():
     return full.iloc[:6000].reset_index(drop=True), full.iloc[6000:].drop(columns=[TARGET]).reset_index(drop=True), True
 
 
-def run(config: dict) -> dict:
-    t0 = time.time()
-    train, test, synthetic = _load()
-    print(f"[run] id={config.get('id')} kind={config.get('kind')} train={train.shape}")
-
+def _prep(train, test):
     Xrich, info, state = build_rich_features(train, fit=True)
     Xte, _, _ = build_rich_features(test, fit=False, state=state)
     y_all = train[TARGET].map(CLS2INT).to_numpy()
     dev_idx, hold_idx = data.holdout_split(train)
-    Xdev, ydev = Xrich.iloc[dev_idx].reset_index(drop=True), y_all[dev_idx]
-    Xhold, yhold = Xrich.iloc[hold_idx].reset_index(drop=True), y_all[hold_idx]
+    return (Xrich.iloc[dev_idx].reset_index(drop=True), y_all[dev_idx],
+            Xrich.iloc[hold_idx].reset_index(drop=True), y_all[hold_idx], Xte, info)
+
+
+def _outdir():
+    return Path("/kaggle/working") if Path("/kaggle/working").exists() else Path(".")
+
+
+def run_single(config: dict) -> dict:
+    """ONE model per kernel (parallel fleet). Persists aligned oof/hold/test + labels for a later stack."""
+    t0 = time.time()
+    train, test, synthetic = _load()
+    spec = config["single"]   # {"name","type":"lgb"|"nn","base":...,"cfg":...}
+    Xdev, ydev, Xhold, yhold, Xte, info = _prep(train, test)
+    print(f"[single] id={config.get('id')} model={spec['name']} train={train.shape}")
+    oof, hold, test_p = single_oof(Xdev, ydev, Xhold, Xte, info, spec, int(config.get("n_folds", 5)))
+    w, s_oof = tune_class_weights(oof, ydev, labels=INTS)
+    s_hold = competition_score(INT2CLS[yhold], weighted_predict(hold, w, labels=CLASSES))
+    od = _outdir(); name = spec["name"]
+    np.save(od / f"oof_{name}.npy", oof); np.save(od / f"hold_{name}.npy", hold); np.save(od / f"test_{name}.npy", test_p)
+    np.save(od / "y_dev.npy", ydev); np.save(od / "y_hold.npy", yhold)
+    test[[ID]].to_csv(od / "test_ids.csv", index=False)
+    result = {"id": config.get("id"), "kind": "single", "model": name, "synthetic": synthetic,
+              "oof": round(s_oof, 5), "holdout": round(s_hold, 5), "runtime_sec": round(time.time() - t0, 1)}
+    (od / "result.json").write_text(json.dumps(result))
+    print(f"[single] {name} OOF {s_oof:.5f} | holdout {s_hold:.5f}")
+    print("RESULT_JSON", json.dumps(result))
+    return result
+
+
+def run(config: dict) -> dict:
+    if config.get("single"):
+        return run_single(config)
+    t0 = time.time()
+    train, test, synthetic = _load()
+    print(f"[run] id={config.get('id')} kind={config.get('kind')} train={train.shape}")
+
+    Xdev, ydev, Xhold, yhold, Xte, info = _prep(train, test)
+    Xrich = Xdev  # (n_features reported below from the dev frame)
     yhold_names = INT2CLS[yhold]
 
     extra_nn = config.get("extra_nn") or []

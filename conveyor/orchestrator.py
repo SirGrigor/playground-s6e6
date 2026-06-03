@@ -113,6 +113,44 @@ def run_one(config: dict) -> dict | None:
     return result
 
 
+def fire_parallel(configs: list, poll_s=30, max_wait_min=180) -> dict:
+    """Push N kernels at once, poll all to completion, harvest each. Returns {id: result}.
+
+    Kaggle may cap concurrent GPU sessions (excess queue, still complete) — degrades gracefully.
+    Each kernel writes its own output to /tmp/conveyor/<id>/ (harvested independently)."""
+    slugs = {}
+    for cfg in configs:
+        wd = Path("/tmp/conveyor") / cfg["id"]
+        slug = render(cfg, wd)
+        print(f"[push] {slug}"); print(_kaggle("kernels", "push", "-p", str(wd)))
+        slugs[cfg["id"]] = (slug, wd)
+    pending = dict(slugs)
+    for _ in range(int(max_wait_min * 60 / poll_s)):
+        if not pending:
+            break
+        done = []
+        for cid, (slug, wd) in pending.items():
+            st = _kaggle("kernels", "status", slug)
+            if any(k in st.upper() for k in ("COMPLETE", "ERROR", "CANCEL")):
+                print(f"[done] {cid}: {st.splitlines()[-1] if st else st}"); done.append(cid)
+        for cid in done:
+            del pending[cid]
+        if pending:
+            time.sleep(poll_s)
+    results = {}
+    for cid, (slug, wd) in slugs.items():
+        r = harvest(slug, wd)
+        results[cid] = r
+        if r:
+            with LEADERBOARD.open("a") as f:
+                f.write(json.dumps({**r, "_slug": slug}) + "\n")
+            print(f"[harvest] {cid}: {({k: r[k] for k in ('model', 'holdout') if k in r})}")
+        else:
+            print(f"[harvest] {cid}: NO RESULT")
+    return results
+
+
 if __name__ == "__main__":
-    cfg = json.loads(Path(sys.argv[1]).read_text())
-    run_one(cfg)
+    arg = json.loads(Path(sys.argv[1]).read_text())
+    # a list of configs → parallel fleet; a single config → one run
+    fire_parallel(arg) if isinstance(arg, list) else run_one(arg)

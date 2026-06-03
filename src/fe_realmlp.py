@@ -240,3 +240,37 @@ def race_oof(Xdev, ydev, Xhold, Xte, info, n_folds, cfg, on_fold=None, seed=MODE
             R["cat_oof"][va] = cp["va"]; R["cat_hold"] += cp["hold"] / n_folds; R["cat_test"] += cp["test"] / n_folds
         R["fva"].append(va)
     return R
+
+
+def single_oof(Xdev, ydev, Xhold, Xte, info, model, n_folds, on_fold=None, seed=MODEL_SEED):
+    """Per-fold loop for ONE model — the parallel-fleet unit (one model per Kaggle kernel).
+
+    model = {"type":"lgb"} | {"type":"nn","base":"realmlp"|"tabm","cfg":{...}}. Uses the SAME folds +
+    per-fold TE as race_oof (fixed seeds) so OOFs from separate kernels ALIGN and can be stacked after.
+    Returns (oof, hold, test)."""
+    from .cv import stratified_folds
+    from .realmlp import DEFAULT_CFG, TABM_CFG, realmlp_fit_predict
+    nc = len(CLASSES); ydev = np.asarray(ydev)
+    combo_cols, native, num_cols = info["combo_cols"], info["native_cat_cols"], info["num_cols"]
+    z = lambda n: np.zeros((n, nc), "float32")
+    oof, hold, test = z(len(Xdev)), z(len(Xhold)), z(len(Xte))
+    for i, (tr, va) in enumerate(stratified_folds(ydev, n_folds), 1):
+        if on_fold:
+            on_fold(i, n_folds)
+        Xtr, Xva = Xdev.iloc[tr], Xdev.iloc[va]
+        te_tr, te_ev, te_names = _fold_te(Xtr, ydev[tr], {"va": Xva, "hold": Xhold, "test": Xte},
+                                          combo_cols, nc, seed + i)
+        cat = lambda X, t: pd.concat([X.reset_index(drop=True), t.reset_index(drop=True)], axis=1)
+        rm_tr, rm_va = cat(Xtr, te_tr), cat(Xva, te_ev["va"])
+        rm_hold, rm_te = cat(Xhold, te_ev["hold"]), cat(Xte, te_ev["test"])
+        if model["type"] == "lgb":
+            lcols = num_cols + native + te_names
+            lp = _lgb_fit_predict(rm_tr[lcols], ydev[tr],
+                                  {"va": rm_va[lcols], "hold": rm_hold[lcols], "test": rm_te[lcols]}, seed + i)
+            oof[va] = lp["va"]; hold += lp["hold"] / n_folds; test += lp["test"] / n_folds
+        else:  # nn (realmlp / tabm)
+            base = TABM_CFG if model.get("base") == "tabm" else DEFAULT_CFG
+            vp, ev = realmlp_fit_predict(rm_tr, ydev[tr], rm_va, ydev[va], {"hold": rm_hold, "test": rm_te},
+                                         {**base, **(model.get("cfg") or {}), "seed": seed + i})
+            oof[va] = vp; hold += ev["hold"] / n_folds; test += ev["test"] / n_folds
+    return oof, hold, test
