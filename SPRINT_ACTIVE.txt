@@ -1,11 +1,10 @@
 # ============================================================================
-# v16 = 3-LEG BLEND: lgb+FE + realmlp+FE + CatBoost+FE (2026-06-03). v15 LogReg-stacker of 2 legs →
-# holdout 0.9694 / LB 0.96933 (passed public Demidov 0.96920). v16 adds CatBoost+FE (native cats =
-# ordered-TS strength) as a 3rd algo-diverse leg, re-blends 3-way (Caruana/LogReg-logits/mean), selects
-# on holdout. Honest prior: CatBoost is another GBDT (v6 ρ0.9 w/ LGBM) → marginal new diversity, but the
-# stacker zero-weights it if redundant = LOW RISK. Verified locally (all 3 legs train, blends run).
-# GPU REQUIRED (~30-35 min: RealMLP race + CatBoost ×5). Target: clear 0.9700 (−0.0006 to go).
-#   v15 2-way blend: notebooks/15_v15_blend.py. FINALS so far: anchor v15_final 0.96933 + hedge v14_realmlp 0.96893.
-#   If CatBoost underwhelms → higher-diversity levers: seed-bag RealMLP + RealMLP Optuna sweep.
+# v17 = SEED-BAGGED RealMLP (×3) + LGBM, 2-way blend (2026-06-03). v16 CatBoost leg HURT on LB
+# (0.96924 < v15 0.96933 — redundant GBDT ρ0.936, holdout-overfit didn't generalize) → DROPPED. v17 takes
+# the GENERALIZING lever: seed-bag our strongest leg (RealMLP, 0.9690 single) ×3 seeds, average → variance
+# reduction (v8 proved it transfers to LB). 2-way LogReg/mean/caruana blend of lgb+FE & rm_bagged.
+# Verified locally (3-seed averaging works). GPU REQUIRED (~40 min: RealMLP ×3 seeds ×5 folds + lgb).
+#   ENDGAME: sub-0.0002 holdout deltas are NOISE here — DECIDE v17 vs v15 on LB (beat 0.96933), not holdout.
+#   FINALS unless v17 wins: anchor v15_final 0.96933 + hedge v14_realmlp 0.96893. NEXT after A = (B) conveyor.
 # ============================================================================
-notebooks/16_v16_catboost_blend.py
+notebooks/17_v17_realmlp_seedbag.py

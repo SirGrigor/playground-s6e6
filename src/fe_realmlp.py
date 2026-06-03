@@ -162,11 +162,14 @@ def _cat_fit_predict(X_tr, y_tr, evals: dict, info, seed, gpu):
 
 
 def race_oof(Xdev, ydev, Xhold, Xte, info, n_folds, cfg, on_fold=None, seed=MODEL_SEED,
-             with_cat=False, gpu=None):
+             with_cat=False, gpu=None, rm_seeds=None):
     """Per-fold loop: inject per-fold TE, train LGBM + RealMLP (+ CatBoost if with_cat) on identical
     folds. Returns dict with oof/hold/test per model + fva. NN sees the full rich set; LGBM sees
     numerics + TE + native cats (high-card derived cats are NN-specific — v3); CatBoost sees the cats
-    native (its ordered-TS strength) minus the raw mega-combos."""
+    native (its ordered-TS strength) minus the raw mega-combos.
+
+    rm_seeds: None → single RealMLP per fold (exact v14/v15 behaviour). A list → SEED-BAG the RealMLP
+    (train once per seed, average) for variance reduction on our strongest leg (v17)."""
     from .cv import stratified_folds
     from .realmlp import realmlp_fit_predict
     if gpu is None:
@@ -194,10 +197,14 @@ def race_oof(Xdev, ydev, Xhold, Xte, info, n_folds, cfg, on_fold=None, seed=MODE
         rm_tr, rm_va = cat(Xtr, te_tr), cat(Xva, te_ev["va"])
         rm_hold, rm_te = cat(Xhold, te_ev["hold"]), cat(Xte, te_ev["test"])
 
-        # RealMLP — full rich features
-        val_p, ev = realmlp_fit_predict(rm_tr, ydev[tr], rm_va, ydev[va],
-                                        {"hold": rm_hold, "test": rm_te}, {**cfg, "seed": seed + i})
-        R["rm_oof"][va] = val_p; R["rm_hold"] += ev["hold"] / n_folds; R["rm_test"] += ev["test"] / n_folds
+        # RealMLP — full rich features (optionally seed-bagged: train per seed, average)
+        seeds_f = [seed + i] if rm_seeds is None else [seed + i * 100 + s for s in rm_seeds]
+        vp = np.zeros((len(va), nc), "float32"); hp = z(len(Xhold)); tp = z(len(Xte))
+        for s in seeds_f:
+            val_p, ev = realmlp_fit_predict(rm_tr, ydev[tr], rm_va, ydev[va],
+                                            {"hold": rm_hold, "test": rm_te}, {**cfg, "seed": s})
+            vp += val_p / len(seeds_f); hp += ev["hold"] / len(seeds_f); tp += ev["test"] / len(seeds_f)
+        R["rm_oof"][va] = vp; R["rm_hold"] += hp / n_folds; R["rm_test"] += tp / n_folds
 
         # LGBM — numerics + TE + native cats
         lcols = lgb_static + te_names
