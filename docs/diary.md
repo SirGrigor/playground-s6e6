@@ -19,6 +19,7 @@ Metric: **balanced_accuracy**. Source of truth: `experiments.jsonl` (git-tracked
 | [v11](versions/v11.md) | `v8` | +0.00050 | +0.00053 | 0.96613 | 0.96544 | +0.00069 | Domain-knowledge features derivable from our columns (Galactic |b|,... | ⚠ multiple_changes |
 | [v13](versions/v13.md) | `v8` | +0.00250 | -0.00473 | 0.96087 | 0.96043 | +0.00044 | A properly-built RealMLP (PBLD periodic embeddings, n_ens internal ... | ⚠ silent_regression, prediction_sign_mismatch, multiple_changes |
 | [v14](versions/v14.md) | `v13` | +0.00500 | +0.00814 | 0.96901 | 0.96846 | +0.00055 | Vladimir's feature engineering (ratios, numeric→categorical, crosse... | ⚠ multiple_changes |
+| [v15](versions/v15.md) | `v14` | +0.00080 | +0.00039 | 0.96940 | 0.96893 | +0.00046 | A supervised blend of the decorrelated (ρ0.85) lgb+FE and realmlp+F... | ⚠ prediction_undershot |
 
 ## Read more
 - Per-version write-ups: `docs/versions/<vN>.md`
