@@ -1,9 +1,11 @@
 # ============================================================================
-# v11 = DOMAIN-KNOWLEDGE features (2026-06-03 research swarm). Probe-first: T1–T4 confirm-or-kill
-# whether the synthetic generator kept the physics, then a leakage-safe baseline-vs-domain ablation
-# (Galactic |b|, stellar-locus L, −9999 dropout flags, long colors). Tests Ilja's hypothesis that
-# domain knowledge finds signal OUTSIDE the raw bands. Honest prior: ~0 (0.9664 = missing channel).
+# v13 = REALMLP, THE PARADIGM BREAK (2026-06-03). The 0.9664 "ceiling" was a GBDT-architecture
+# artifact: public RealMLP hits ~0.968 from the SAME columns (+0.0025 over our best GBDT). v7
+# dismissed RealMLP after ONE under-tuned run. This runs OUR reimplementation (src/realmlp.py:
+# PBLD periodic embeddings + n_ens internal bag + balanced-softmax metric-aware loss + EMA)
+# HEAD-TO-HEAD vs the LGBM baseline on the same features → is the ceiling real? Verified locally:
+# model learns (synthetic OOF 0.41→0.74→1.00 over epochs). Expect ~0.968 on real data, GPU ~30-60min.
+#   Prior versions: v11 domain features (notebooks/12_v11_domain.py, +0.0004 — now a footnote).
 #   Locked finals unchanged: v8_final2_meanbag.csv (0.96641 anchor) + v8_final1_caruana (hedge).
-#   To re-run the winning consolidation instead: notebooks/09_v8_consolidation.py
 # ============================================================================
-notebooks/12_v11_domain.py
+notebooks/13_v13_realmlp.py
