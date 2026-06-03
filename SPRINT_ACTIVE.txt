@@ -1,11 +1,11 @@
 # ============================================================================
-# v15 = SUPERVISED BLEND of lgb+FE & realmlp+FE (2026-06-03). v14 BROKE the ceiling: realmlp+FE 0.9690,
-# lgb+FE 0.9682, ρ=0.85 (decorrelated AND both strong) = textbook blend setup. Re-runs the deterministic
-# v14 race (reproduces both OOF+test — v14 only saved test), then fits 3 blends on the labeled dev OOF
-# (Caruana / LogReg-on-logits [Deotte's move] / mean), selects on the held-out holdout, writes v15_final.
-# Persists OOF (probs/v15_*_oof.npy) so future blends skip the re-run. Verified locally (all 3 blends run).
-# GPU REQUIRED (~25 min, re-runs the RealMLP race). Target: clear 0.9700.
-#   v14 race: notebooks/14_v14_realmlp_fe.py | v13 bare RealMLP: notebooks/13_v13_realmlp.py.
-#   NOTE: v14 results SUPERSEDE the old locked finals (0.96641) — re-pick finals around v14/v15.
+# v16 = 3-LEG BLEND: lgb+FE + realmlp+FE + CatBoost+FE (2026-06-03). v15 LogReg-stacker of 2 legs →
+# holdout 0.9694 / LB 0.96933 (passed public Demidov 0.96920). v16 adds CatBoost+FE (native cats =
+# ordered-TS strength) as a 3rd algo-diverse leg, re-blends 3-way (Caruana/LogReg-logits/mean), selects
+# on holdout. Honest prior: CatBoost is another GBDT (v6 ρ0.9 w/ LGBM) → marginal new diversity, but the
+# stacker zero-weights it if redundant = LOW RISK. Verified locally (all 3 legs train, blends run).
+# GPU REQUIRED (~30-35 min: RealMLP race + CatBoost ×5). Target: clear 0.9700 (−0.0006 to go).
+#   v15 2-way blend: notebooks/15_v15_blend.py. FINALS so far: anchor v15_final 0.96933 + hedge v14_realmlp 0.96893.
+#   If CatBoost underwhelms → higher-diversity levers: seed-bag RealMLP + RealMLP Optuna sweep.
 # ============================================================================
-notebooks/15_v15_blend.py
+notebooks/16_v16_catboost_blend.py

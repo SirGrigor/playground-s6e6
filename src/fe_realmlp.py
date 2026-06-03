@@ -144,14 +144,36 @@ def _lgb_fit_predict(X_tr, y_tr, evals: dict, seed):
     return {k: m.predict_proba(prep(Xe)) for k, Xe in evals.items()}
 
 
-def race_oof(Xdev, ydev, Xhold, Xte, info, n_folds, cfg, on_fold=None, seed=MODEL_SEED):
-    """Per-fold loop: inject per-fold TE, train LGBM + RealMLP on identical folds.
+def _cat_fit_predict(X_tr, y_tr, evals: dict, info, seed, gpu):
+    """CatBoost on numerics + TE + categoricals NATIVE (ordered target stats — its strength), the
+    raw high-card combos dropped (their per-class TE is already a feature). 3rd, algo-diverse leg."""
+    from catboost import CatBoostClassifier
+    keep = [c for c in X_tr.columns if c not in info["combo_cols"]]
+    cat_feats = [c for c in keep if str(X_tr[c].dtype) == "category"]
+    def prep(X):
+        X = X[keep].copy()
+        for c in cat_feats:
+            X[c] = X[c].cat.codes.astype("int32")
+        return X
+    m = CatBoostClassifier(iterations=1500, learning_rate=0.05, depth=6, loss_function="MultiClass",
+                           random_seed=seed, verbose=0, task_type=("GPU" if gpu else "CPU"))
+    m.fit(prep(X_tr), np.asarray(y_tr), cat_features=cat_feats)
+    return {k: m.predict_proba(prep(Xe)).astype("float32") for k, Xe in evals.items()}
 
-    Returns dict with oof/hold/test for both models + fold_va. NN sees the full rich set; LGBM sees
-    numerics + TE + native cats (the high-card derived cats are NN-specific embeddings — v3 says they
-    only overfit a tree)."""
+
+def race_oof(Xdev, ydev, Xhold, Xte, info, n_folds, cfg, on_fold=None, seed=MODEL_SEED,
+             with_cat=False, gpu=None):
+    """Per-fold loop: inject per-fold TE, train LGBM + RealMLP (+ CatBoost if with_cat) on identical
+    folds. Returns dict with oof/hold/test per model + fva. NN sees the full rich set; LGBM sees
+    numerics + TE + native cats (high-card derived cats are NN-specific — v3); CatBoost sees the cats
+    native (its ordered-TS strength) minus the raw mega-combos."""
     from .cv import stratified_folds
     from .realmlp import realmlp_fit_predict
+    if gpu is None:
+        try:
+            import torch; gpu = torch.cuda.is_available()
+        except Exception:
+            gpu = False
     nc = len(CLASSES); ydev = np.asarray(ydev)
     combo_cols, native, num_cols = info["combo_cols"], info["native_cat_cols"], info["num_cols"]
     lgb_static = num_cols + native  # + per-fold TE names
@@ -159,6 +181,8 @@ def race_oof(Xdev, ydev, Xhold, Xte, info, n_folds, cfg, on_fold=None, seed=MODE
     z = lambda n: np.zeros((n, nc), "float32")
     R = {"lgb_oof": z(len(Xdev)), "lgb_hold": z(len(Xhold)), "lgb_test": z(len(Xte)),
          "rm_oof": z(len(Xdev)), "rm_hold": z(len(Xhold)), "rm_test": z(len(Xte)), "fva": []}
+    if with_cat:
+        R.update({"cat_oof": z(len(Xdev)), "cat_hold": z(len(Xhold)), "cat_test": z(len(Xte))})
 
     for i, (tr, va) in enumerate(stratified_folds(ydev, n_folds), 1):
         if on_fold:
@@ -180,5 +204,11 @@ def race_oof(Xdev, ydev, Xhold, Xte, info, n_folds, cfg, on_fold=None, seed=MODE
         lp = _lgb_fit_predict(rm_tr[lcols], ydev[tr],
                               {"va": rm_va[lcols], "hold": rm_hold[lcols], "test": rm_te[lcols]}, seed + i)
         R["lgb_oof"][va] = lp["va"]; R["lgb_hold"] += lp["hold"] / n_folds; R["lgb_test"] += lp["test"] / n_folds
+
+        # CatBoost — native categoricals (3rd algo-diverse leg)
+        if with_cat:
+            cp = _cat_fit_predict(rm_tr, ydev[tr], {"va": rm_va, "hold": rm_hold, "test": rm_te},
+                                  info, seed + i, gpu)
+            R["cat_oof"][va] = cp["va"]; R["cat_hold"] += cp["hold"] / n_folds; R["cat_test"] += cp["test"] / n_folds
         R["fva"].append(va)
     return R
