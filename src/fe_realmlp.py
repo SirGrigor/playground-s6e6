@@ -162,7 +162,7 @@ def _cat_fit_predict(X_tr, y_tr, evals: dict, info, seed, gpu):
 
 
 def race_oof(Xdev, ydev, Xhold, Xte, info, n_folds, cfg, on_fold=None, seed=MODEL_SEED,
-             with_cat=False, gpu=None, rm_seeds=None, with_tabm=False, tabm_cfg=None):
+             with_cat=False, gpu=None, rm_seeds=None, with_tabm=False, tabm_cfg=None, extra_nn=None):
     """Per-fold loop: inject per-fold TE, train LGBM + RealMLP (+ CatBoost if with_cat) on identical
     folds. Returns dict with oof/hold/test per model + fva. NN sees the full rich set; LGBM sees
     numerics + TE + native cats (high-card derived cats are NN-specific — v3); CatBoost sees the cats
@@ -188,6 +188,9 @@ def race_oof(Xdev, ydev, Xhold, Xte, info, n_folds, cfg, on_fold=None, seed=MODE
         R.update({"cat_oof": z(len(Xdev)), "cat_hold": z(len(Xhold)), "cat_test": z(len(Xte))})
     if with_tabm:
         R.update({"tabm_oof": z(len(Xdev)), "tabm_hold": z(len(Xhold)), "tabm_test": z(len(Xte))})
+    extra_nn = extra_nn or []
+    for e in extra_nn:
+        R.update({f"{e['name']}_oof": z(len(Xdev)), f"{e['name']}_hold": z(len(Xhold)), f"{e['name']}_test": z(len(Xte))})
 
     for i, (tr, va) in enumerate(stratified_folds(ydev, n_folds), 1):
         if on_fold:
@@ -220,6 +223,15 @@ def race_oof(Xdev, ydev, Xhold, Xte, info, n_folds, cfg, on_fold=None, seed=MODE
             tval, tev = realmlp_fit_predict(rm_tr, ydev[tr], rm_va, ydev[va], {"hold": rm_hold, "test": rm_te},
                                             {**TABM_CFG, **(tabm_cfg or {}), "seed": seed + i})
             R["tabm_oof"][va] = tval; R["tabm_hold"] += tev["hold"] / n_folds; R["tabm_test"] += tev["test"] / n_folds
+
+        # extra NN legs (fleet diversity) — each {"name", "base":"realmlp"|"tabm", "cfg":{...}}
+        for e in extra_nn:
+            from .realmlp import DEFAULT_CFG, TABM_CFG
+            base = TABM_CFG if e.get("base") == "tabm" else DEFAULT_CFG
+            ev_p, eev = realmlp_fit_predict(rm_tr, ydev[tr], rm_va, ydev[va], {"hold": rm_hold, "test": rm_te},
+                                            {**base, **(e.get("cfg") or {}), "seed": seed + i})
+            nm = e["name"]
+            R[f"{nm}_oof"][va] = ev_p; R[f"{nm}_hold"] += eev["hold"] / n_folds; R[f"{nm}_test"] += eev["test"] / n_folds
 
         # CatBoost — native categoricals (3rd algo-diverse leg)
         if with_cat:

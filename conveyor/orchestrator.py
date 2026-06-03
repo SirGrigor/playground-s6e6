@@ -66,7 +66,7 @@ def render(config: dict, workdir: Path) -> str:
     return slug
 
 
-def submit_and_wait(slug: str, workdir: Path, poll_s=20, max_polls=120) -> str:
+def submit_and_wait(slug: str, workdir: Path, poll_s=30, max_polls=240) -> str:  # ~120 min cap
     print(f"[push] {slug}")
     print(_kaggle("kernels", "push", "-p", str(workdir)))
     for i in range(max_polls):

@@ -72,15 +72,18 @@ def run(config: dict) -> dict:
     Xhold, yhold = Xrich.iloc[hold_idx].reset_index(drop=True), y_all[hold_idx]
     yhold_names = INT2CLS[yhold]
 
+    extra_nn = config.get("extra_nn") or []
     R = race_oof(Xdev, ydev, Xhold, Xte, info,
                  n_folds=int(config.get("n_folds", 5)),
                  cfg=config.get("rm_cfg", {}),
                  with_cat=bool(config.get("with_cat", False)),
                  with_tabm=bool(config.get("with_tabm", False)),
                  tabm_cfg=config.get("tabm_cfg"),
-                 rm_seeds=config.get("rm_seeds"))
+                 rm_seeds=config.get("rm_seeds"),
+                 extra_nn=extra_nn)
 
-    legs = ["lgb", "rm"] + (["tabm"] if config.get("with_tabm") else []) + (["cat"] if config.get("with_cat") else [])
+    legs = (["lgb", "rm"] + (["tabm"] if config.get("with_tabm") else [])
+            + [e["name"] for e in extra_nn] + (["cat"] if config.get("with_cat") else []))
     result = {"id": config.get("id"), "kind": config.get("kind", "realmlp_race"),
               "config": config, "synthetic": synthetic, "n_features": int(Xrich.shape[1]), "legs": legs}
     for name in legs:
