@@ -30,7 +30,7 @@ LEADERBOARD = HERE / "leaderboard.jsonl"
 
 KERNEL_TEMPLATE = '''\
 import json, subprocess, sys, os
-CONFIG = {config_json}
+CONFIG = json.loads({config_json})  # parse JSON (handles false/true/null), don't inline as Python
 print("=== CONVEYOR KERNEL", CONFIG.get("id"), "===")
 subprocess.run(["git", "clone", "-q", "--depth", "1", "{repo_url}"], check=True)
 REPO = os.path.join(os.getcwd(), "playground-s6e6")
@@ -56,7 +56,7 @@ def render(config: dict, workdir: Path) -> str:
     workdir.mkdir(parents=True, exist_ok=True)
     slug = f"{USER}/s6e6-cv-{config['id']}".replace("_", "-").lower()
     (workdir / "main.py").write_text(
-        KERNEL_TEMPLATE.format(config_json=json.dumps(config), repo_url=REPO_URL))
+        KERNEL_TEMPLATE.format(config_json=repr(json.dumps(config)), repo_url=REPO_URL))
     (workdir / "kernel-metadata.json").write_text(json.dumps({
         "id": slug, "title": f"s6e6 cv {config['id']}"[:50], "code_file": "main.py",
         "language": "python", "kernel_type": "script", "is_private": True,
