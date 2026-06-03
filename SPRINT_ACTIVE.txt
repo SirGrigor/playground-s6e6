@@ -1,7 +1,9 @@
 # ============================================================================
-# S6E6 COMPLETE. Best = v8_final2_meanbag.csv (LB 0.96641). 0.9664 PROVEN as the practical
-# ceiling: v9 (label-noise 0.9% + overlap 2.4%) + v7 NN + v10 TabICLv2 (both decorrelated but
-# too weak → 0 ensemble weight). 2 locked finals: meanbag (anchor) + v8_final1_caruana (hedge).
-# To re-run the winning consolidation: notebooks/09_v8_consolidation.py
+# v11 = DOMAIN-KNOWLEDGE features (2026-06-03 research swarm). Probe-first: T1–T4 confirm-or-kill
+# whether the synthetic generator kept the physics, then a leakage-safe baseline-vs-domain ablation
+# (Galactic |b|, stellar-locus L, −9999 dropout flags, long colors). Tests Ilja's hypothesis that
+# domain knowledge finds signal OUTSIDE the raw bands. Honest prior: ~0 (0.9664 = missing channel).
+#   Locked finals unchanged: v8_final2_meanbag.csv (0.96641 anchor) + v8_final1_caruana (hedge).
+#   To re-run the winning consolidation instead: notebooks/09_v8_consolidation.py
 # ============================================================================
-notebooks/09_v8_consolidation.py
+notebooks/12_v11_domain.py

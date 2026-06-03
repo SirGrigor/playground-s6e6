@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import base64
 import json
+from html import escape
 from pathlib import Path
 
 from .config import METRIC, REPORTS, ROOT
@@ -200,15 +201,16 @@ def render_html(panels: dict[str, Path] | None = None, *, prefix: str = "latest"
     for e in rows:
         flags = ", ".join(f.split("(")[0] for f in (e.get("flags") or []))
         flag_cls = " class='flag'" if flags else ""
+        hyp = (e.get("hypothesis") or "").strip()
         def fmt(v, p=".5f"):
             return f"{v:{p}}" if isinstance(v, (int, float)) else "—"
         diary_html.append(
-            f"<tr><td>{e.get('version','?')}</td><td>{e.get('parent') or '—'}</td>"
+            f"<tr><td>{escape(str(e.get('version','?')))}</td><td>{escape(str(e.get('parent') or '—'))}</td>"
             f"<td>{fmt(e.get('predicted_delta'), '+.5f')}</td>"
             f"<td>{fmt(e.get('actual_delta'), '+.5f')}</td>"
             f"<td>{fmt(e.get('holdout_score'))}</td><td>{fmt(e.get('oof_score_mean'))}</td>"
-            f"<td class='hyp'>{(e.get('hypothesis') or '')[:90]}</td>"
-            f"<td{flag_cls}>{flags}</td></tr>"
+            f"<td class='hyp'><div class='clip' title=\"{escape(hyp, quote=True)}\">{escape(hyp)}</div></td>"
+            f"<td{flag_cls}><div class='clip f' title=\"{escape(flags, quote=True)}\">{escape(flags)}</div></td></tr>"
         )
     diary_html.append("</table>")
 
@@ -221,23 +223,33 @@ def render_html(panels: dict[str, Path] | None = None, *, prefix: str = "latest"
 
     html = f"""<!doctype html><html><head><meta charset='utf-8'><title>{title}</title>
 <style>
- body{{font-family:-apple-system,Segoe UI,Roboto,sans-serif;margin:24px;background:#0f1117;color:#e6e6e6}}
+ *{{box-sizing:border-box}}
+ html,body{{height:auto;overscroll-behavior:contain;scroll-behavior:smooth}}
+ body{{font-family:-apple-system,Segoe UI,Roboto,sans-serif;margin:0;padding:24px;
+   background:#0f1117;color:#e6e6e6;overflow-x:hidden}}
+ .wrap{{max-width:1400px;margin:0 auto}}
  h1{{font-weight:600}} h2{{border-bottom:1px solid #333;padding-bottom:4px;margin-top:32px}}
- .grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:18px}}
- figure{{margin:0;background:#171a23;border:1px solid #262b38;border-radius:8px;padding:10px}}
+ .grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:18px}}
+ figure{{margin:0;min-width:0;background:#171a23;border:1px solid #262b38;border-radius:8px;padding:10px}}
  figcaption{{font-size:13px;color:#8aa;margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em}}
- img{{width:100%;border-radius:4px}} .missing{{color:#a55;font-style:italic}}
- table{{border-collapse:collapse;width:100%;font-size:13px}}
- th,td{{border:1px solid #2a2f3c;padding:5px 8px;text-align:right}}
- th{{background:#1b1f2a;color:#9bb}} td.hyp{{text-align:left;color:#bcd}} td.flag{{color:#e88;font-weight:600}}
+ img{{display:block;width:100%;height:auto;border-radius:4px}} .missing{{color:#a55;font-style:italic}}
+ .tablewrap{{overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:6px}}
+ table{{border-collapse:collapse;width:auto;max-width:100%;font-size:13px}}
+ th,td{{border:1px solid #2a2f3c;padding:5px 8px;text-align:right;white-space:nowrap}}
+ th{{background:#1b1f2a;color:#9bb;position:sticky;top:0;z-index:1}}
+ td.hyp{{text-align:left;color:#bcd}} td.flag{{color:#e88;font-weight:600}}
+ .clip{{max-width:460px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
+ .clip.f{{max-width:200px}}
  .meta{{color:#778;font-size:13px}}
 </style></head><body>
+<div class='wrap'>
 <h1>{title}</h1>
 <p class='meta'>metric: <b>{METRIC}</b> · prefix: <b>{prefix}</b> · floor {FLOOR:.4f} → target {TARGET:.4f}</p>
 <h2>Diagnostics — {prefix}</h2>
 <div class='grid'>{panels_html}</div>
 <h2>Experiment timeline</h2>
-{''.join(diary_html)}
+<div class='tablewrap'>{''.join(diary_html)}</div>
+</div>
 </body></html>"""
     out = REPORTS / "dashboard.html"
     out.write_text(html)
