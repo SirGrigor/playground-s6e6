@@ -107,11 +107,12 @@ def run_diagnose(config: dict) -> dict:
     from sklearn.neighbors import NearestNeighbors
     from sklearn.preprocessing import StandardScaler
 
+    sys.stdout.reconfigure(line_buffering=True)   # unbuffered: survive a crash with output intact
     t0 = time.time()
     train, test, synthetic = _load()
     Xdev, ydev, Xhold, yhold, Xte, info = _prep(train, test)
     nc = len(CLASSES); ydev = np.asarray(ydev)
-    print(f"[diagnose] dev={Xdev.shape} synthetic={synthetic}")
+    print(f"[diagnose] dev={Xdev.shape} synthetic={synthetic}", flush=True)
 
     # (1) strong proxy for the consensus error cell: the actual lgb leg's OOF (ρ~0.8 w/ the fleet)
     oof, _, _ = single_oof(Xdev, ydev, Xhold, Xte, info, {"name": "lgb", "type": "lgb"}, 5)
@@ -126,12 +127,16 @@ def run_diagnose(config: dict) -> dict:
     print("    per-true-class error rate: " + ", ".join(
         f"{c} {(1 - cm[i, i] / cm[i].sum()) * 100:.2f}%" for i, c in enumerate(CLASSES)))
 
-    # full feature space (numeric + one-hot cats), standardized, sampled
-    cat = [c for c in Xdev.columns if str(Xdev[c].dtype) == "category"]
-    num = [c for c in Xdev.columns if c not in cat]
-    Xn = Xdev[num].astype(float); Xn = Xn.fillna(Xn.median())
+    # full feature space, standardized, sampled. One-hot only LOW-card cats (≤15 levels) to avoid an
+    # OOM blow-up — high-card crossed cats are already captured numerically by the per-class TE columns.
+    cat_all = [c for c in Xdev.columns if str(Xdev[c].dtype) == "category"]
+    cat = [c for c in cat_all if Xdev[c].nunique() <= 15]
+    num = [c for c in Xdev.columns if c not in cat_all]
+    Xn = Xdev[num].apply(pd.to_numeric, errors="coerce"); Xn = Xn.fillna(Xn.median())
     Xfull = Xn if not cat else pd.concat(
-        [Xn, pd.get_dummies(Xdev[cat].astype("string").fillna("NA"), dummy_na=False).astype(float)], axis=1)
+        [Xn, pd.get_dummies(Xdev[cat].astype("string").fillna("NA"), dummy_na=False).astype("float32")], axis=1)
+    print(f"[space] {Xfull.shape[1]} dims ({len(num)} numeric + {len(cat)} low-card cats one-hot; "
+          f"dropped {len(cat_all) - len(cat)} high-card cats — TE-encoded numerically)", flush=True)
     rng = np.random.default_rng(42)
     samp = rng.choice(len(ydev), size=min(120_000, len(ydev)), replace=False)
 
