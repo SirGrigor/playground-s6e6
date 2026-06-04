@@ -73,10 +73,13 @@ def fleet_stack(ids: list, out_csv: Path = ROOT / "fleet_submission.csv"):
 
     oofs, holds, tests = {}, {}, {}
     for d in dirs:
-        nm = _model_name(d)
-        oofs[nm] = np.load(d / f"oof_{nm}.npy")
-        holds[nm] = np.load(d / f"hold_{nm}.npy")
-        tests[nm] = np.load(d / f"test_{nm}.npy")
+        try:                                              # skip incomplete harvests (Gemini audit: robustness)
+            nm = _model_name(d)
+            oofs[nm] = np.load(d / f"oof_{nm}.npy")
+            holds[nm] = np.load(d / f"hold_{nm}.npy")
+            tests[nm] = np.load(d / f"test_{nm}.npy")
+        except (StopIteration, FileNotFoundError):
+            print(f"  skip {d.name}: incomplete artifacts"); continue
         ho = competition_score(INT2CLS[yhold],
                                weighted_predict(holds[nm], tune_class_weights(oofs[nm], ydev, labels=INTS)[0], labels=CLASSES))
         print(f"  leg {nm:<10} holdout {ho:.5f}")
@@ -90,7 +93,7 @@ def fleet_stack(ids: list, out_csv: Path = ROOT / "fleet_submission.csv"):
         h = competition_score(INT2CLS[yhold], weighted_predict(ap["hold"], w, labels=CLASSES))
         return cv, h, ap["test"], w
 
-    cv_all, h_all, _, _ = _stack(list(oofs))
+    cv_all, h_all, test_all, w_all = _stack(list(oofs))   # cache (Gemini audit: was double-computed)
     print(f"\n[stack-all] {len(oofs)} legs → CV {cv_all:.5f} | holdout {h_all:.5f}")
 
     print("\n[greedy] forward-selecting the complementary subset (on stack-CV):")
@@ -98,9 +101,9 @@ def fleet_stack(ids: list, out_csv: Path = ROOT / "fleet_submission.csv"):
     cv_g, h_g, test_g, w_g = _stack(chosen)
     print(f"[greedy] chosen {chosen} → CV {cv_g:.5f} | holdout {h_g:.5f}")
 
-    # submit the better of all-legs vs greedy subset
+    # submit the better of all-legs vs greedy subset (decision on the pristine holdout)
     use_all = h_all >= h_g
-    cv_f, h_f, test_f, w_f = (cv_all, h_all, *_stack(list(oofs))[2:]) if use_all else (cv_g, h_g, test_g, w_g)
+    test_f, w_f = (test_all, w_all) if use_all else (test_g, w_g)
     pd.DataFrame({ID: test_ids[ID], TARGET: weighted_predict(test_f, w_f, labels=CLASSES)}).to_csv(out_csv, index=False)
     print(f"\n[fleet-stack] WINNER = {'all '+str(len(oofs))+' legs' if use_all else 'greedy '+str(chosen)} "
           f"→ holdout {max(h_all, h_g):.5f} | submission → {out_csv}")
