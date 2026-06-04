@@ -319,9 +319,13 @@ def single_oof(Xdev, ydev, Xhold, Xte, info, model, n_folds, on_fold=None, seed=
                                  {"va": rm_va, "hold": rm_hold, "test": rm_te}, info, te_names, seed + i,
                                  model.get("params"))
             oof[va] = sp["va"]; hold += sp["hold"] / n_folds; test += sp["test"] / n_folds
-        else:  # nn (realmlp / tabm)
+        else:  # nn (realmlp / tabm) — optionally SEED-AVERAGED (model["seeds"]=[0,1,2]) to cut draw noise
             base = TABM_CFG if model.get("base") == "tabm" else DEFAULT_CFG
-            vp, ev = realmlp_fit_predict(rm_tr, ydev[tr], rm_va, ydev[va], {"hold": rm_hold, "test": rm_te},
-                                         {**base, **(model.get("cfg") or {}), "seed": seed + i})
-            oof[va] = vp; hold += ev["hold"] / n_folds; test += ev["test"] / n_folds
+            seeds = model.get("seeds") or [0]
+            vp, hp, tp = z(len(va)), z(len(Xhold)), z(len(Xte))
+            for s in seeds:
+                v, ev = realmlp_fit_predict(rm_tr, ydev[tr], rm_va, ydev[va], {"hold": rm_hold, "test": rm_te},
+                                            {**base, **(model.get("cfg") or {}), "seed": seed + i + s * 1000})
+                vp += v / len(seeds); hp += ev["hold"] / len(seeds); tp += ev["test"] / len(seeds)
+            oof[va] = vp; hold += hp / n_folds; test += tp / n_folds
     return oof, hold, test
