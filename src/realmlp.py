@@ -52,6 +52,15 @@ TABM_CFG = {**DEFAULT_CFG, "arch": "tabm", "n_ens": 32, "hidden_dims": [1024, 51
             "dropout": 0.0, "p_drop_sched": "constant", "activation": "silu",
             "pbld_freq_scale": 5.0, "pbld_lr_factor": 0.093}
 
+# FT-Transformer (attention paradigm — strong AND decorrelated from MLP/tree legs). Architecture in
+# src/fttransformer.py; reuses _fit_one (balanced-softmax loss + EMA). n_ens=1 (single attention model).
+# Gemini-drafted config, Claude-tuned: lr 1e-4 + cosine (transformers need it), no weight-decay on biases.
+FT_CFG = {**DEFAULT_CFG, "arch": "ft", "n_ens": 1, "lr": 1e-4, "weight_decay": 1e-5,
+          "lr_sched": "cos", "flat_ratio": 0.0, "epochs": 15, "train_bs": 512, "ls_eps": 0.0,
+          "lr_bias_mult": 1.0, "wd_bias_mult": 0.0,
+          "d_token": 192, "n_blocks": 3, "n_heads": 8, "attention_dropout": 0.2,
+          "ffn_dropout": 0.1, "ffn_factor": 4 / 3}
+
 
 def _act(name):
     import torch.nn as nn
@@ -200,14 +209,14 @@ def _build_modules():
 
 
 def _param_groups(model, p):
-    first_id = id(model.first_linear.weight)
+    first_id = id(model.first_linear.weight) if hasattr(model, "first_linear") else None
     scale, pbld, first_w, other_w, bias = [], [], [], [], []
     for name, par in model.named_parameters():
         if "num_embed" in name:
             pbld.append(par)
         elif "scale" in name:
             scale.append(par)
-        elif id(par) == first_id:
+        elif first_id is not None and id(par) == first_id:
             first_w.append(par)
         elif "bias" in name:
             bias.append(par)
@@ -275,7 +284,11 @@ def _fit_one(Xn_tr, Xc_tr, y_tr, Xn_va, Xc_va, y_va, cat_dims, cfg):
     pre = _Preprocessor(cfg["tfms"]).fit(Xn_tr)
     Xn_tr, Xn_va = pre.transform(Xn_tr), pre.transform(Xn_va)
 
-    Net = _build_modules()
+    if cfg.get("arch") == "ft":
+        from .fttransformer import build_fttransformer
+        Net = build_fttransformer()
+    else:
+        Net = _build_modules()
     model = Net(n_classes, cat_dims, Xn_tr.shape[1], cfg).to(dev)
 
     # balanced-softmax prior multipliers (the metric-aware term)

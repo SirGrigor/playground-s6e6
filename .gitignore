@@ -37,3 +37,7 @@ conveyor/leaderboard.jsonl
 result.json
 config.json
 /tmp/conveyor/
+
+# run artifacts
+*.npy
+submission.csv

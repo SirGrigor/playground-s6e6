@@ -318,7 +318,8 @@ def single_oof(Xdev, ydev, Xhold, Xte, info, model, n_folds, on_fold=None, seed=
     per-fold TE as race_oof (fixed seeds) so OOFs from separate kernels ALIGN and can be stacked after.
     Returns (oof, hold, test)."""
     from .cv import stratified_folds
-    from .realmlp import DEFAULT_CFG, TABM_CFG, realmlp_fit_predict
+    from .realmlp import DEFAULT_CFG, FT_CFG, TABM_CFG, realmlp_fit_predict
+    BASES = {"tabm": TABM_CFG, "ft": FT_CFG}
     nc = len(CLASSES); ydev = np.asarray(ydev)
     combo_cols, native, num_cols = info["combo_cols"], info["native_cat_cols"], info["num_cols"]
     z = lambda n: np.zeros((n, nc), "float32")
@@ -342,8 +343,8 @@ def single_oof(Xdev, ydev, Xhold, Xte, info, model, n_folds, on_fold=None, seed=
                                  {"va": rm_va, "hold": rm_hold, "test": rm_te}, info, te_names, seed + i,
                                  model.get("params"))
             oof[va] = sp["va"]; hold += sp["hold"] / n_folds; test += sp["test"] / n_folds
-        else:  # nn (realmlp / tabm) — optionally SEED-AVERAGED (model["seeds"]=[0,1,2]) to cut draw noise
-            base = TABM_CFG if model.get("base") == "tabm" else DEFAULT_CFG
+        else:  # nn (realmlp / tabm / ft) — optionally SEED-AVERAGED (model["seeds"]=[0,1,2])
+            base = BASES.get(model.get("base"), DEFAULT_CFG)
             seeds = model.get("seeds") or [0]
             vp, hp, tp = z(len(va)), z(len(Xhold)), z(len(Xte))
             for s in seeds:
