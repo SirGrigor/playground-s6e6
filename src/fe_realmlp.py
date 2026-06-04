@@ -144,6 +144,36 @@ def _lgb_fit_predict(X_tr, y_tr, evals: dict, seed):
     return {k: m.predict_proba(prep(Xe)) for k, Xe in evals.items()}
 
 
+def _knn_features(pool_X, pool_y, query_X, k=30, exclude_self=False, cols=None):
+    """Leak-safe kNN VIEW — describe each query row by its k nearest neighbours in standardized
+    PHYSICAL space (photometry + redshift), using ONLY pool (training-fold) labels. A genuinely
+    decorrelated representation: local manifold structure every per-object model is blind to.
+
+    LEAK DISCIPLINE: pool_y must be the TRAINING-fold labels, never the query's own. For pool==query
+    (training rows) pass exclude_self=True to drop the self-match. Returns per-class neighbour fractions
+    (target-encoding on the manifold) + local density + neighbour redshift stats."""
+    from sklearn.neighbors import NearestNeighbors
+    nc = len(CLASSES)
+    cols = cols or [c for c in ["u", "g", "r", "i", "z", "redshift"] if c in pool_X.columns]
+    P = pool_X[cols].to_numpy("float32")
+    mu, sd = P.mean(0), P.std(0) + 1e-9
+    Ps = (P - mu) / sd
+    Qs = (query_X[cols].to_numpy("float32") - mu) / sd
+    kq = k + 1 if exclude_self else k
+    nn = NearestNeighbors(n_neighbors=kq, n_jobs=-1).fit(Ps)
+    dist, idx = nn.kneighbors(Qs)
+    if exclude_self:
+        dist, idx = dist[:, 1:], idx[:, 1:]          # drop the self-neighbour
+    ynb = np.asarray(pool_y)[idx]                     # (n_query, k) neighbour labels — pool only
+    znb = pool_X["redshift"].to_numpy("float32")[idx] if "redshift" in pool_X.columns else None
+    feats = {f"knn_frac_{c}": (ynb == c).mean(1) for c in range(nc)}   # manifold class distribution
+    feats["knn_dist_mean"] = dist.mean(1)            # local density (sparse = unusual object)
+    feats["knn_dist_max"] = dist[:, -1]
+    if znb is not None:
+        feats["knn_z_mean"], feats["knn_z_std"] = znb.mean(1), znb.std(1)
+    return pd.DataFrame(feats)
+
+
 def _sk_model(kind, seed, p):
     """Decorrelated CPU paradigms (different inductive bias from boosted-trees / NNs)."""
     if kind == "extratrees":
@@ -343,6 +373,17 @@ def single_oof(Xdev, ydev, Xhold, Xte, info, model, n_folds, on_fold=None, seed=
                                  {"va": rm_va, "hold": rm_hold, "test": rm_te}, info, te_names, seed + i,
                                  model.get("params"))
             oof[va] = sp["va"]; hold += sp["hold"] / n_folds; test += sp["test"] / n_folds
+        elif model["type"] == "knn":  # decorrelated kNN-VIEW leg → LGBM on neighbour features (leak-safe by fold)
+            p = model.get("params") or {}; k = p.get("k", 30)
+            kc = [c for c in ["u", "g", "r", "i", "z", "redshift"] if c in Xtr.columns]
+            if p.get("coords"):
+                kc += [c for c in ["alpha", "delta"] if c in Xtr.columns]
+            f_tr = _knn_features(Xtr, ydev[tr], Xtr, k, exclude_self=True, cols=kc)   # LOO for the LGBM's own train
+            f_va = _knn_features(Xtr, ydev[tr], Xva, k, cols=kc)                      # va: pool=tr only → no leak
+            f_ho = _knn_features(Xtr, ydev[tr], Xhold, k, cols=kc)
+            f_te = _knn_features(Xtr, ydev[tr], Xte, k, cols=kc)
+            kp = _lgb_fit_predict(f_tr, ydev[tr], {"va": f_va, "hold": f_ho, "test": f_te}, seed + i)
+            oof[va] = kp["va"]; hold += kp["hold"] / n_folds; test += kp["test"] / n_folds
         else:  # nn (realmlp / tabm / ft) — optionally SEED-AVERAGED (model["seeds"]=[0,1,2])
             base = BASES.get(model.get("base"), DEFAULT_CFG)
             seeds = model.get("seeds") or [0]

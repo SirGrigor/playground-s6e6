@@ -142,3 +142,23 @@ The win came from a **discovery-first loop**, not luck:
 And the hardest lesson, worth more than the score: **we declared a ceiling we hadn't actually proven —
 we'd proven our *method* was saturated.** The reusable guard: an "irreducible error" claim is only valid
 relative to the model class that measured it. Change the paradigm before declaring physics.
+
+---
+
+## FT-Transformer leg — undertraining test (conveyor experiment, 2026-06-04)
+
+**Context.** Built an FT-Transformer (attention) leg to add a 3rd paradigm to the MLP+tree fleet.
+First run `ft1` (15 epochs, n_ens=1): single-leg bal-acc **0.96631**, genuinely decorrelated
+(ρ(ft,rm)=0.807) but ~0.003 weaker than the leaders (rm/tabm 0.969). Clean ablation: adding ft to
+{rm,tabm,lgb} moved holdout **−0.00030** and CV **−0.00003** — it does NOT earn its stack seat. Too weak
+for its decorrelation to pay (`value ≈ strength × (1−corr)`).
+
+**Hypothesis (`ft2`, written before training).** FT@15ep is **undertrained**, not saturated — transformers
+converge slower than MLPs and the smoke learning curve was still climbing at epoch 12. Test: epochs 15→50,
+weight_decay 1e-5→5e-5 (regularize the longer schedule), **everything else identical** to isolate training
+duration. (Config converged with brother Gemini; Claude-verified.)
+
+**Predicted delta.** Single-leg bal-acc 0.96631 → **0.968+** (predicted +0.0015–0.003). Decision rule:
+- crosses ~0.968 → undertraining confirmed; FT's decorrelation should then ADD to the stack → pursue ensembling.
+- moves <+0.0005 → FT saturated → **three paradigms (MLP/tree/attention) all at ~0.9697 = a real ceiling**,
+  not a single-architecture artifact (unlike the earlier false ceiling). Lock {rm,tabm,lgb}=0.96974 as anchor.
