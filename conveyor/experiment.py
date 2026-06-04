@@ -94,7 +94,85 @@ def run_single(config: dict) -> dict:
     return result
 
 
+def run_diagnose(config: dict) -> dict:
+    """Error-cell diagnostic — IS 0.9697 the data's floor, or is there a signal we're missing?
+
+    The decorrelation lever exhausted (kNN-view ρ0.766 added +0.00004). This asks the mechanism
+    question directly: (1) WHERE the errors are (confusion), (2) the kNN-Bayes floor in full feature
+    space, (3) is local label-disagreement HIGHER on our error rows (→ genuine overlap), (4) the
+    local-ORACLE ceiling: label each row by its neighbours' TRUE majority — if that can't beat 0.9697,
+    no model can. (5) coords loose-end: do alpha/delta carry signal we excluded?"""
+    import numpy as np
+    from sklearn.metrics import balanced_accuracy_score, confusion_matrix
+    from sklearn.neighbors import NearestNeighbors
+    from sklearn.preprocessing import StandardScaler
+
+    t0 = time.time()
+    train, test, synthetic = _load()
+    Xdev, ydev, Xhold, yhold, Xte, info = _prep(train, test)
+    nc = len(CLASSES); ydev = np.asarray(ydev)
+    print(f"[diagnose] dev={Xdev.shape} synthetic={synthetic}")
+
+    # (1) strong proxy for the consensus error cell: the actual lgb leg's OOF (ρ~0.8 w/ the fleet)
+    oof, _, _ = single_oof(Xdev, ydev, Xhold, Xte, info, {"name": "lgb", "type": "lgb"}, 5)
+    pred = oof.argmax(1)
+    err = pred != ydev
+    base_ba = balanced_accuracy_score(ydev, pred)
+    cm = confusion_matrix(ydev, pred)
+    print(f"\n[1] lgb-proxy OOF balanced-acc {base_ba:.5f} | error rate {err.mean()*100:.2f}%")
+    print("    confusion (rows=true, cols=pred) over", CLASSES)
+    for i, c in enumerate(CLASSES):
+        print(f"      {c:<7} " + "  ".join(f"{cm[i, j]:>7d}" for j in range(nc)))
+    print("    per-true-class error rate: " + ", ".join(
+        f"{c} {(1 - cm[i, i] / cm[i].sum()) * 100:.2f}%" for i, c in enumerate(CLASSES)))
+
+    # full feature space (numeric + one-hot cats), standardized, sampled
+    cat = [c for c in Xdev.columns if str(Xdev[c].dtype) == "category"]
+    num = [c for c in Xdev.columns if c not in cat]
+    Xn = Xdev[num].astype(float); Xn = Xn.fillna(Xn.median())
+    Xfull = Xn if not cat else pd.concat(
+        [Xn, pd.get_dummies(Xdev[cat].astype("string").fillna("NA"), dummy_na=False).astype(float)], axis=1)
+    rng = np.random.default_rng(42)
+    samp = rng.choice(len(ydev), size=min(120_000, len(ydev)), replace=False)
+
+    def floor_and_oracle(cols, tag):
+        Xs = StandardScaler().fit_transform(Xfull[cols].iloc[samp].to_numpy())
+        ys = ydev[samp]; es = err[samp]
+        nn = NearestNeighbors(n_neighbors=31, n_jobs=-1).fit(Xs)
+        _, nbr = nn.kneighbors(Xs); nbr = nbr[:, 1:]            # drop self
+        disagree = (ys[nbr] != ys[:, None]).mean(1)             # per-row neighbour disagreement
+        # local ORACLE: predict each row by neighbours' TRUE majority label
+        votes = np.zeros((len(ys), nc))
+        for c in range(nc):
+            votes[:, c] = (ys[nbr] == c).sum(1)
+        oracle = votes.argmax(1)
+        oracle_ba = balanced_accuracy_score(ys, oracle)
+        print(f"\n[{tag}] kNN(k=30) full-space floor:")
+        print(f"      neighbour label-disagreement: overall {disagree.mean()*100:.2f}% | "
+              f"on ERROR rows {disagree[es].mean()*100:.2f}% | on CORRECT rows {disagree[~es].mean()*100:.2f}%")
+        print(f"      LOCAL-ORACLE balanced-acc (neighbour true-majority) = {oracle_ba:.5f}  "
+              f"(vs our {base_ba:.5f})")
+        return oracle_ba
+
+    o_noc = floor_and_oracle([c for c in Xfull.columns if c not in ("alpha", "delta")], "2/3/4 no-coords")
+    o_c = floor_and_oracle(list(Xfull.columns), "5 with-coords")
+    print(f"\n[coords] local-oracle Δ from adding alpha/delta: {o_c - o_noc:+.5f}  "
+          f"({'coords carry signal' if o_c - o_noc > 0.001 else 'coords ~ noise (as expected for synthetic)'})")
+
+    print(f"\n[verdict] if local-oracle ≈ our {base_ba:.4f} → at the feature-space floor (real ceiling). "
+          f"if oracle ≫ ours → recoverable local signal we're missing.")
+    result = {"id": config.get("id"), "kind": "diagnose", "synthetic": synthetic,
+              "base_ba": round(float(base_ba), 5), "oracle_noc": round(float(o_noc), 5),
+              "oracle_coords": round(float(o_c), 5), "err_rate": round(float(err.mean()), 5),
+              "runtime_sec": round(time.time() - t0, 1)}
+    out = _outdir(); (out / "result.json").write_text(json.dumps(result))
+    print("\nRESULT_JSON", json.dumps(result))
+    return result
+
+
 def run(config: dict) -> dict:
+    if config.get("kind") == "diagnose":
+        return run_diagnose(config)
     if config.get("single"):
         return run_single(config)
     t0 = time.time()
