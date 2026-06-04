@@ -165,28 +165,51 @@ def _sk_model(kind, seed, p):
 
 
 def _sk_fit_predict(kind, X_tr, y_tr, evals: dict, info, te_names, seed, params=None):
-    """A sklearn paradigm leg on numerics + TE + native-cat codes. Impute NaN; scale for linear."""
-    from sklearn.preprocessing import StandardScaler
-    cols = info["num_cols"] + info["native_cat_cols"] + te_names
-    native = info["native_cat_cols"]
-    def mat(X):
-        M = X[cols].copy()
-        for c in native:
+    """A sklearn paradigm leg. `params["features"]` tailors the representation to the paradigm
+    (Prong B — empower the weak decorrelated legs):
+      'lgb'  (default) numerics + TE + native-cat codes
+      'poly' + degree-2 PolynomialFeatures on the core numerics → gives LINEAR models the
+             interactions/nonlinearity they lack (LogReg 0.95 → ~0.96, stays decorrelated)
+      'rich' + the derived cat codes (numeric→cat, KBins) → more features for trees
+    Impute NaN; scale for linear."""
+    from sklearn.preprocessing import PolynomialFeatures, StandardScaler
+    p = params or {}; mode = p.get("features", "lgb")
+    num, native = info["num_cols"], info["native_cat_cols"]
+    derived = [c for c in X_tr.columns if (c.endswith("_cat_") or c.endswith("_qbin_"))] if mode == "rich" else []
+    cat_like = native + derived
+    base_cols = num + cat_like + te_names
+
+    def codes(X):
+        M = X[base_cols].copy()
+        for c in cat_like:
             if str(M[c].dtype) == "category":
                 M[c] = M[c].cat.codes
         return M.astype("float32").to_numpy()
-    Xtr = mat(X_tr); med = np.nanmedian(Xtr, axis=0)
+
+    med = np.nanmedian(codes(X_tr), axis=0)
     imp = lambda A: np.where(np.isnan(A), med[None, :], A).astype("float32")
-    Xtr = imp(Xtr)
-    sc = StandardScaler().fit(Xtr) if kind in ("logreg",) else None
-    if sc is not None:
-        Xtr = sc.transform(Xtr)
-    m = _sk_model(kind, seed, params or {})
-    m.fit(Xtr, np.asarray(y_tr))
+    st = {}
+    if mode == "poly":
+        P = X_tr[num].astype("float32").to_numpy()
+        st["pmed"] = np.nanmedian(P, axis=0)
+        st["poly"] = PolynomialFeatures(2, include_bias=False).fit(np.where(np.isnan(P), st["pmed"], P))
+
+    def featurize(X):
+        M = imp(codes(X))
+        if mode == "poly":
+            P = X[num].astype("float32").to_numpy()
+            P = np.where(np.isnan(P), st["pmed"], P)
+            M = np.concatenate([M, st["poly"].transform(P).astype("float32")], axis=1)
+        return M
+
+    Xtr = featurize(X_tr)
+    sc = StandardScaler().fit(Xtr) if kind == "logreg" else None
+    m = _sk_model(kind, seed, p)
+    m.fit(sc.transform(Xtr) if sc is not None else Xtr, np.asarray(y_tr))
     out = {}
     for k, Xe in evals.items():
-        Me = imp(mat(Xe))
-        out[k] = m.predict_proba(sc.transform(Me) if sc is not None else Me).astype("float32")
+        E = featurize(Xe)
+        out[k] = m.predict_proba(sc.transform(E) if sc is not None else E).astype("float32")
     return out
 
 
