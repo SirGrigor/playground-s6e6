@@ -32,6 +32,37 @@ def _model_name(d: Path) -> str:
     return f.stem[len("oof_"):]
 
 
+def _rho(a, b):
+    from scipy.stats import rankdata
+    return float(np.mean([np.corrcoef(rankdata(a[:, k]), rankdata(b[:, k]))[0, 1] for k in range(a.shape[1])]))
+
+
+def _rho_matrix(oofs: dict):
+    names = list(oofs)
+    print("\n[rho] pairwise rank-correlation (lower = more decorrelated):")
+    print("        " + "".join(f"{n[:7]:>8}" for n in names))
+    for a in names:
+        print(f"  {a[:7]:>6} " + "".join(f"{_rho(oofs[a], oofs[b]):>8.3f}" for b in names))
+
+
+def greedy_select(oofs: dict, ydev, min_gain=1e-5):
+    """Forward selection on the CV'd-stack OOF score — add the leg that most improves the STACK,
+    not the best single. Auto-rejects correlated-but-redundant members (e.g. rm_b)."""
+    remaining, selected, best = set(oofs), [], -1.0
+    while remaining:
+        scored = []
+        for n in remaining:
+            sub = selected + [n]
+            _, _, cv = cv_logreg_stack({k: oofs[k] for k in sub}, ydev, {}, n_seeds=1, n_folds=3)  # cheap for search
+            scored.append((cv, n))
+        cv, n = max(scored)
+        if selected and cv <= best + min_gain:
+            break
+        best, selected = cv, selected + [n]; remaining.discard(n)
+        print(f"  + {n:<10} stack-CV {cv:.5f}")
+    return selected, best
+
+
 def fleet_stack(ids: list, out_csv: Path = ROOT / "fleet_submission.csv"):
     dirs = [ROOT / i for i in ids]
     labels_dir = next((d for d in dirs if (d / "y_dev.npy").exists()), None)
@@ -50,14 +81,30 @@ def fleet_stack(ids: list, out_csv: Path = ROOT / "fleet_submission.csv"):
                                weighted_predict(holds[nm], tune_class_weights(oofs[nm], ydev, labels=INTS)[0], labels=CLASSES))
         print(f"  leg {nm:<10} holdout {ho:.5f}")
 
-    stack_oof, stacked, cv = cv_logreg_stack(oofs, ydev, {"hold": holds, "test": tests})
-    w, _ = tune_class_weights(stack_oof, ydev, labels=INTS)
-    stack_hold = competition_score(INT2CLS[yhold], weighted_predict(stacked["hold"], w, labels=CLASSES))
-    print(f"\n[fleet-stack] {len(oofs)} legs {list(oofs)} → CV {cv:.5f} | holdout {stack_hold:.5f}")
+    _rho_matrix(oofs)
 
-    pd.DataFrame({ID: test_ids[ID], TARGET: weighted_predict(stacked["test"], w, labels=CLASSES)}).to_csv(out_csv, index=False)
-    print(f"[fleet-stack] submission → {out_csv}")
-    return stack_hold
+    def _stack(names):
+        so, ap, cv = cv_logreg_stack({k: oofs[k] for k in names}, ydev,
+                                     {"hold": {k: holds[k] for k in names}, "test": {k: tests[k] for k in names}})
+        w, _ = tune_class_weights(so, ydev, labels=INTS)
+        h = competition_score(INT2CLS[yhold], weighted_predict(ap["hold"], w, labels=CLASSES))
+        return cv, h, ap["test"], w
+
+    cv_all, h_all, _, _ = _stack(list(oofs))
+    print(f"\n[stack-all] {len(oofs)} legs → CV {cv_all:.5f} | holdout {h_all:.5f}")
+
+    print("\n[greedy] forward-selecting the complementary subset (on stack-CV):")
+    chosen, cv_best = greedy_select(oofs, ydev)
+    cv_g, h_g, test_g, w_g = _stack(chosen)
+    print(f"[greedy] chosen {chosen} → CV {cv_g:.5f} | holdout {h_g:.5f}")
+
+    # submit the better of all-legs vs greedy subset
+    use_all = h_all >= h_g
+    cv_f, h_f, test_f, w_f = (cv_all, h_all, *_stack(list(oofs))[2:]) if use_all else (cv_g, h_g, test_g, w_g)
+    pd.DataFrame({ID: test_ids[ID], TARGET: weighted_predict(test_f, w_f, labels=CLASSES)}).to_csv(out_csv, index=False)
+    print(f"\n[fleet-stack] WINNER = {'all '+str(len(oofs))+' legs' if use_all else 'greedy '+str(chosen)} "
+          f"→ holdout {max(h_all, h_g):.5f} | submission → {out_csv}")
+    return max(h_all, h_g)
 
 
 if __name__ == "__main__":

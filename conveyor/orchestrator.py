@@ -51,6 +51,13 @@ def _kaggle(*args, timeout=600):
     return (out.stdout + out.stderr).replace("Warning: Looks like you're using an outdated", "").strip()
 
 
+def _is_done(st: str) -> bool:
+    """A kernel is terminal only on a real KernelWorkerStatus — NOT a transient 404/'Client Error'
+    (which contains 'Error' and would otherwise be mistaken for the ERROR status)."""
+    up = st.upper()
+    return "KERNELWORKERSTATUS." in up and any(k in up for k in ("COMPLETE", "ERROR", "CANCEL"))
+
+
 def render(config: dict, workdir: Path) -> str:
     """Write kernel-metadata.json + main.py for `config`. Returns the kernel slug."""
     workdir.mkdir(parents=True, exist_ok=True)
@@ -71,7 +78,7 @@ def submit_and_wait(slug: str, workdir: Path, poll_s=30, max_polls=240) -> str: 
     print(_kaggle("kernels", "push", "-p", str(workdir)))
     for i in range(max_polls):
         st = _kaggle("kernels", "status", slug)
-        done = any(k in st.upper() for k in ("COMPLETE", "ERROR", "CANCEL"))
+        done = _is_done(st)
         print(f"[poll {i + 1}] {st.splitlines()[-1] if st else st}")
         if done:
             return st
@@ -113,7 +120,7 @@ def run_one(config: dict) -> dict | None:
     return result
 
 
-def fire_parallel(configs: list, poll_s=30, max_wait_min=180) -> dict:
+def fire_parallel(configs: list, poll_s=45, max_wait_min=360) -> dict:
     """Push N kernels at once, poll all to completion, harvest each. Returns {id: result}.
 
     Kaggle may cap concurrent GPU sessions (excess queue, still complete) — degrades gracefully.
@@ -131,7 +138,7 @@ def fire_parallel(configs: list, poll_s=30, max_wait_min=180) -> dict:
         done = []
         for cid, (slug, wd) in pending.items():
             st = _kaggle("kernels", "status", slug)
-            if any(k in st.upper() for k in ("COMPLETE", "ERROR", "CANCEL")):
+            if _is_done(st):
                 print(f"[done] {cid}: {st.splitlines()[-1] if st else st}"); done.append(cid)
         for cid in done:
             del pending[cid]

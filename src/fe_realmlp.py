@@ -144,6 +144,52 @@ def _lgb_fit_predict(X_tr, y_tr, evals: dict, seed):
     return {k: m.predict_proba(prep(Xe)) for k, Xe in evals.items()}
 
 
+def _sk_model(kind, seed, p):
+    """Decorrelated CPU paradigms (different inductive bias from boosted-trees / NNs)."""
+    if kind == "extratrees":
+        from sklearn.ensemble import ExtraTreesClassifier  # random-split bagged trees (variance reducer)
+        return ExtraTreesClassifier(n_estimators=p.get("n_estimators", 600), min_samples_leaf=p.get("msl", 5),
+                                    n_jobs=-1, random_state=seed, class_weight="balanced")
+    if kind == "rf":
+        from sklearn.ensemble import RandomForestClassifier
+        return RandomForestClassifier(n_estimators=p.get("n_estimators", 500), min_samples_leaf=p.get("msl", 5),
+                                      n_jobs=-1, random_state=seed, class_weight="balanced")
+    if kind == "histgb":
+        from sklearn.ensemble import HistGradientBoostingClassifier  # different GBDT impl, native NaN
+        return HistGradientBoostingClassifier(max_iter=p.get("max_iter", 600), learning_rate=p.get("lr", 0.05),
+                                              random_state=seed, class_weight="balanced")
+    if kind == "logreg":
+        from sklearn.linear_model import LogisticRegression  # GLOBAL linear — maximally different from trees/NN
+        return LogisticRegression(C=p.get("C", 1.0), max_iter=2000, class_weight="balanced")
+    raise ValueError(kind)
+
+
+def _sk_fit_predict(kind, X_tr, y_tr, evals: dict, info, te_names, seed, params=None):
+    """A sklearn paradigm leg on numerics + TE + native-cat codes. Impute NaN; scale for linear."""
+    from sklearn.preprocessing import StandardScaler
+    cols = info["num_cols"] + info["native_cat_cols"] + te_names
+    native = info["native_cat_cols"]
+    def mat(X):
+        M = X[cols].copy()
+        for c in native:
+            if str(M[c].dtype) == "category":
+                M[c] = M[c].cat.codes
+        return M.astype("float32").to_numpy()
+    Xtr = mat(X_tr); med = np.nanmedian(Xtr, axis=0)
+    imp = lambda A: np.where(np.isnan(A), med[None, :], A).astype("float32")
+    Xtr = imp(Xtr)
+    sc = StandardScaler().fit(Xtr) if kind in ("logreg",) else None
+    if sc is not None:
+        Xtr = sc.transform(Xtr)
+    m = _sk_model(kind, seed, params or {})
+    m.fit(Xtr, np.asarray(y_tr))
+    out = {}
+    for k, Xe in evals.items():
+        Me = imp(mat(Xe))
+        out[k] = m.predict_proba(sc.transform(Me) if sc is not None else Me).astype("float32")
+    return out
+
+
 def _cat_fit_predict(X_tr, y_tr, evals: dict, info, seed, gpu):
     """CatBoost on numerics + TE + categoricals NATIVE (ordered target stats — its strength), the
     raw high-card combos dropped (their per-class TE is already a feature). 3rd, algo-diverse leg."""
@@ -268,6 +314,11 @@ def single_oof(Xdev, ydev, Xhold, Xte, info, model, n_folds, on_fold=None, seed=
             lp = _lgb_fit_predict(rm_tr[lcols], ydev[tr],
                                   {"va": rm_va[lcols], "hold": rm_hold[lcols], "test": rm_te[lcols]}, seed + i)
             oof[va] = lp["va"]; hold += lp["hold"] / n_folds; test += lp["test"] / n_folds
+        elif model["type"] in ("extratrees", "rf", "histgb", "logreg"):
+            sp = _sk_fit_predict(model["type"], rm_tr, ydev[tr],
+                                 {"va": rm_va, "hold": rm_hold, "test": rm_te}, info, te_names, seed + i,
+                                 model.get("params"))
+            oof[va] = sp["va"]; hold += sp["hold"] / n_folds; test += sp["test"] / n_folds
         else:  # nn (realmlp / tabm)
             base = TABM_CFG if model.get("base") == "tabm" else DEFAULT_CFG
             vp, ev = realmlp_fit_predict(rm_tr, ydev[tr], rm_va, ydev[va], {"hold": rm_hold, "test": rm_te},
