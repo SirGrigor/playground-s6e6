@@ -175,7 +175,65 @@ def run_diagnose(config: dict) -> dict:
     return result
 
 
+def run_adv_validation(config: dict) -> dict:
+    """Adversarial validation on the CURRENT rich FE (audit #1 — the gate).
+
+    Our 'CV is trustworthy / ceiling is real' edifice rests on adv-AUC=0.499 measured at v2 on RAW BANDS,
+    before every winning feature. This re-measures it on build_rich_features (ratios/colors/num->cat/KBins/
+    crossed cats) — the space the models actually see. A binary GBDT tries to tell train from test under CV.
+    AUC~0.5 = i.i.d., CV trustworthy for finals. AUC>>0.5 = a train/test shift; the top features NAME it."""
+    import sys
+    sys.stdout.reconfigure(line_buffering=True)
+    import numpy as np
+    import lightgbm as lgb
+    from sklearn.model_selection import StratifiedKFold
+    from sklearn.metrics import roc_auc_score
+
+    t0 = time.time()
+    train, test, synthetic = _load()
+    Xtr, info, state = build_rich_features(train, fit=True)
+    Xte, _, _ = build_rich_features(test, fit=False, state=state)
+    common = [c for c in Xtr.columns if c in Xte.columns and c not in (ID, TARGET)]
+    Xtr, Xte = Xtr[common].copy(), Xte[common].copy()
+    print(f"[advval] rich FE: {len(common)} features | train={len(Xtr)} test={len(Xte)} synthetic={synthetic}", flush=True)
+
+    cat = [c for c in common if str(Xtr[c].dtype) == "category"]
+    for c in cat:                                  # unify category codes across train+test
+        cats = pd.api.types.union_categoricals([Xtr[c], Xte[c]]).categories
+        Xtr[c] = Xtr[c].cat.set_categories(cats).cat.codes
+        Xte[c] = Xte[c].cat.set_categories(cats).cat.codes
+    X = pd.concat([Xtr, Xte], ignore_index=True)
+    yadv = np.r_[np.zeros(len(Xtr)), np.ones(len(Xte))]
+
+    aucs, imp = [], np.zeros(len(common))
+    for i, (tr, va) in enumerate(StratifiedKFold(5, shuffle=True, random_state=42).split(X, yadv), 1):
+        m = lgb.LGBMClassifier(n_estimators=300, learning_rate=0.05, num_leaves=63,
+                               subsample=0.8, colsample_bytree=0.8, n_jobs=-1, verbose=-1)
+        m.fit(X.iloc[tr], yadv[tr])
+        a = roc_auc_score(yadv[va], m.predict_proba(X.iloc[va])[:, 1])
+        aucs.append(a); imp += m.feature_importances_ / 5
+        print(f"  fold {i}: adv-AUC {a:.4f}", flush=True)
+    auc = float(np.mean(aucs))
+    order = np.argsort(imp)[::-1][:15]
+    print(f"\n[advval] mean adv-AUC = {auc:.4f}  (0.50 = i.i.d. → CV trustworthy; >0.55 = train/test SHIFT)", flush=True)
+    print("  top train/test-distinguishing features (potential shift/leak sources):", flush=True)
+    for j in order:
+        print(f"    {common[j]:40s} imp {imp[j]:8.1f}", flush=True)
+    verdict = ("i.i.d. — CV trustworthy for finals" if auc <= 0.52 else
+               "MILD shift — watch the top features" if auc <= 0.55 else
+               "SHIFT — CV may mislead; regularize the named features")
+    print(f"\n[verdict] {verdict}", flush=True)
+    result = {"id": config.get("id"), "kind": "advval", "synthetic": synthetic,
+              "adv_auc": round(auc, 4), "n_features": len(common),
+              "top_features": [common[j] for j in order], "runtime_sec": round(time.time() - t0, 1)}
+    out = _outdir(); (out / "result.json").write_text(json.dumps(result))
+    print("\nRESULT_JSON", json.dumps(result), flush=True)
+    return result
+
+
 def run(config: dict) -> dict:
+    if config.get("kind") == "advval":
+        return run_adv_validation(config)
     if config.get("kind") == "diagnose":
         return run_diagnose(config)
     if config.get("single"):
