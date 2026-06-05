@@ -144,6 +144,29 @@ def _lgb_fit_predict(X_tr, y_tr, evals: dict, seed):
     return {k: m.predict_proba(prep(Xe)) for k, Xe in evals.items()}
 
 
+def _xgb_fit_predict(X_tr, y_tr, evals: dict, seed):
+    """XGBoost multiclass — the strong GBDT leg we LACK (Deotte's stack: 4 XGBs in the top-7). Balanced
+    sample-weights for the macro-recall metric; category cols → int codes. Fixed strong config (no early
+    stop, to fit the (X,y,evals,seed) leg signature)."""
+    import xgboost as xgb
+    y = np.asarray(y_tr)
+    cat_cols = [c for c in X_tr.columns if str(X_tr[c].dtype) == "category"]
+    def prep(X):
+        X = X.copy()
+        for c in cat_cols:
+            X[c] = X[c].cat.codes.astype("int32")
+        return X
+    cls, cnt = np.unique(y, return_counts=True)
+    cw = {int(c): len(y) / (len(cls) * int(n)) for c, n in zip(cls, cnt)}
+    sw = np.array([cw[int(c)] for c in y], dtype="float32")
+    m = xgb.XGBClassifier(objective="multi:softprob", num_class=len(CLASSES), tree_method="hist",
+                          n_estimators=1100, learning_rate=0.03, max_depth=8, max_bin=512,
+                          subsample=0.82, colsample_bytree=0.70, min_child_weight=8,
+                          gamma=0.1, reg_alpha=0.3, reg_lambda=3.0, random_state=seed, n_jobs=-1)
+    m.fit(prep(X_tr), y, sample_weight=sw)
+    return {k: m.predict_proba(prep(Xe)) for k, Xe in evals.items()}
+
+
 def _knn_features(pool_X, pool_y, query_X, k=30, exclude_self=False, cols=None):
     """Leak-safe kNN VIEW — describe each query row by its k nearest neighbours in standardized
     PHYSICAL space (photometry + redshift), using ONLY pool (training-fold) labels. A genuinely
@@ -372,6 +395,11 @@ def single_oof(Xdev, ydev, Xhold, Xte, info, model, n_folds, on_fold=None, seed=
             lp = _lgb_fit_predict(Xtr_l, ytr_l,
                                   {"va": rm_va[lcols], "hold": rm_hold[lcols], "test": rm_te[lcols]}, seed + i)
             oof[va] = lp["va"]; hold += lp["hold"] / n_folds; test += lp["test"] / n_folds
+        elif model["type"] == "xgb":
+            lcols = num_cols + native + te_names
+            xp = _xgb_fit_predict(rm_tr[lcols], ydev[tr],
+                                  {"va": rm_va[lcols], "hold": rm_hold[lcols], "test": rm_te[lcols]}, seed + i)
+            oof[va] = xp["va"]; hold += xp["hold"] / n_folds; test += xp["test"] / n_folds
         elif model["type"] in ("extratrees", "rf", "histgb", "logreg"):
             sp = _sk_fit_predict(model["type"], rm_tr, ydev[tr],
                                  {"va": rm_va, "hold": rm_hold, "test": rm_te}, info, te_names, seed + i,

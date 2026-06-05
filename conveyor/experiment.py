@@ -399,19 +399,20 @@ def run_prior_leg(config: dict) -> dict:
     X["gr_z_cell"] = cellcol(Xdev).astype("category")       # own-label cell TE (per-fold OOF)
     Xh["gr_z_cell"] = cellcol(Xhold).astype("category"); Xt["gr_z_cell"] = cellcol(Xte).astype("category")
     inf["combo_cols"] = info["combo_cols"] + ["gr_z_cell"]
-    print(f"[priorleg] built ext+own augmented LGB leg ({len(emap)} cells)", flush=True)
+    lt = config.get("leg_type", "lgb"); name = f"{lt}p"   # 'lgbp' or 'xgbp' (the strong-XGB+priors bundle leg)
+    print(f"[priorleg] built ext+own augmented {lt.upper()} leg ({len(emap)} cells)", flush=True)
 
-    oof, hold, test_p = single_oof(X, ydev, Xh, Xt, inf, {"name": "lgbp", "type": "lgb"}, nf)
+    oof, hold, test_p = single_oof(X, ydev, Xh, Xt, inf, {"name": name, "type": lt}, nf)
     from src.metrics import tune_class_weights, weighted_predict, competition_score
     w, oof_ba = tune_class_weights(oof, ydev, labels=list(range(len(CLASSES))))
     hold_ba = competition_score(np.asarray(CLASSES)[yhold], weighted_predict(hold, w, labels=CLASSES))
-    print(f"[priorleg] lgbp OOF {oof_ba:.5f} | holdout {hold_ba:.5f}  (plain f-lgb was 0.96825)", flush=True)
+    print(f"[priorleg] {name} OOF {oof_ba:.5f} | holdout {hold_ba:.5f}  (plain f-lgb was 0.96825)", flush=True)
 
     out = _outdir()
-    np.save(out / "oof_lgbp.npy", oof); np.save(out / "hold_lgbp.npy", hold); np.save(out / "test_lgbp.npy", test_p)
+    np.save(out / f"oof_{name}.npy", oof); np.save(out / f"hold_{name}.npy", hold); np.save(out / f"test_{name}.npy", test_p)
     np.save(out / "y_dev.npy", ydev); np.save(out / "y_hold.npy", yhold)
     pd.DataFrame({ID: test[ID]}).to_csv(out / "test_ids.csv", index=False)
-    result = {"id": config.get("id"), "kind": "priorleg", "model": "lgbp", "synthetic": synthetic,
+    result = {"id": config.get("id"), "kind": "priorleg", "model": name, "synthetic": synthetic,
               "oof": round(float(oof_ba), 5), "holdout": round(float(hold_ba), 5),
               "runtime_sec": round(time.time() - t0, 1)}
     (out / "result.json").write_text(json.dumps(result))
