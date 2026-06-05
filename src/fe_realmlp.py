@@ -341,7 +341,7 @@ def race_oof(Xdev, ydev, Xhold, Xte, info, n_folds, cfg, on_fold=None, seed=MODE
     return R
 
 
-def single_oof(Xdev, ydev, Xhold, Xte, info, model, n_folds, on_fold=None, seed=MODEL_SEED):
+def single_oof(Xdev, ydev, Xhold, Xte, info, model, n_folds, on_fold=None, seed=MODEL_SEED, pseudo_y=None):
     """Per-fold loop for ONE model — the parallel-fleet unit (one model per Kaggle kernel).
 
     model = {"type":"lgb"} | {"type":"nn","base":"realmlp"|"tabm","cfg":{...}}. Uses the SAME folds +
@@ -365,7 +365,11 @@ def single_oof(Xdev, ydev, Xhold, Xte, info, model, n_folds, on_fold=None, seed=
         rm_hold, rm_te = cat(Xhold, te_ev["hold"]), cat(Xte, te_ev["test"])
         if model["type"] == "lgb":
             lcols = num_cols + native + te_names
-            lp = _lgb_fit_predict(rm_tr[lcols], ydev[tr],
+            Xtr_l, ytr_l = rm_tr[lcols], ydev[tr]
+            if pseudo_y is not None:  # TRANSDUCTIVE PL: append test rows (with stage-1 labels) to TRAIN only.
+                Xtr_l = pd.concat([Xtr_l.reset_index(drop=True), rm_te[lcols].reset_index(drop=True)], ignore_index=True)
+                ytr_l = np.r_[ydev[tr], np.asarray(pseudo_y)]   # OOF (rm_va) stays REAL held-out → leak-safe
+            lp = _lgb_fit_predict(Xtr_l, ytr_l,
                                   {"va": rm_va[lcols], "hold": rm_hold[lcols], "test": rm_te[lcols]}, seed + i)
             oof[va] = lp["va"]; hold += lp["hold"] / n_folds; test += lp["test"] / n_folds
         elif model["type"] in ("extratrees", "rf", "histgb", "logreg"):

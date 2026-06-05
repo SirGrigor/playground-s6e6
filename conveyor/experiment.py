@@ -231,7 +231,62 @@ def run_adv_validation(config: dict) -> dict:
     return result
 
 
+def run_pl(config: dict) -> dict:
+    """Transductive pseudo-labeling (audit/domain lever #1). Stage 1: normal CV → test preds. Stage 2:
+    hard-label ALL test rows (argmax), append to EACH train fold, re-fit; OOF scored on REAL rows only
+    (pseudo rows NEVER enter OOF/CV — the #1 PL leak). Pre-registered kill: GALAXY recall must rise."""
+    import sys
+    sys.stdout.reconfigure(line_buffering=True)
+    import numpy as np
+    from sklearn.metrics import balanced_accuracy_score, recall_score
+    t0 = time.time()
+    train, test, synthetic = _load()
+    Xdev, ydev, Xhold, yhold, Xte, info = _prep(train, test)
+    ydev = np.asarray(ydev); spec = config["single"]; nf = int(config.get("n_folds", 5))
+
+    def report(tag, oof):
+        pred = oof.argmax(1)
+        ba = balanced_accuracy_score(ydev, pred)
+        rec = recall_score(ydev, pred, average=None, labels=list(range(len(CLASSES))))
+        print(f"  [{tag}] OOF bal-acc {ba:.5f} | recall " +
+              " ".join(f"{c}={r:.4f}" for c, r in zip(CLASSES, rec)), flush=True)
+        return ba, rec
+
+    print(f"[pl] stage 1: base {spec.get('name')} (no PL)", flush=True)
+    oof1, hold1, test1 = single_oof(Xdev, ydev, Xhold, Xte, info, spec, nf)
+    ba1, rec1 = report("stage1", oof1)
+
+    pseudo_y = test1.argmax(1).astype(int)
+    from collections import Counter
+    print(f"[pl] stage 2: TRANSDUCTIVE PL — {len(pseudo_y)} test rows pseudo-labeled "
+          f"{dict((CLASSES[k], v) for k, v in sorted(Counter(pseudo_y).items()))}", flush=True)
+    oof2, hold2, test2 = single_oof(Xdev, ydev, Xhold, Xte, info, spec, nf, pseudo_y=pseudo_y)
+    ba2, rec2 = report("stage2-PL", oof2)
+
+    gal = CLASSES.index("GALAXY")
+    d_gal, d_ba = rec2[gal] - rec1[gal], ba2 - ba1
+    verdict = ("PL HELPS — GALAXY recall up, pursue" if d_gal > 0.0005 and d_ba >= -0.0001 else
+               "PL FLAT/HARMFUL — GAL<->STAR confirmed morphology-capped" if d_gal <= 0.0005 else "MIXED")
+    print(f"\n[pl-verdict] ΔGALAXY-recall {d_gal:+.5f}  Δbal-acc {d_ba:+.5f}  → {verdict}", flush=True)
+
+    out = _outdir(); name = spec.get("name", "leg")
+    np.save(out / f"oof_{name}.npy", oof2); np.save(out / f"hold_{name}.npy", hold2)
+    np.save(out / f"test_{name}.npy", test2)
+    np.save(out / "y_dev.npy", ydev); np.save(out / "y_hold.npy", np.asarray(yhold))
+    pd.DataFrame({ID: test[ID]}).to_csv(out / "test_ids.csv", index=False)
+    result = {"id": config.get("id"), "kind": "pl", "model": name, "synthetic": synthetic,
+              "ba_stage1": round(float(ba1), 5), "ba_stage2_pl": round(float(ba2), 5),
+              "gal_recall_stage1": round(float(rec1[gal]), 5), "gal_recall_stage2_pl": round(float(rec2[gal]), 5),
+              "delta_gal_recall": round(float(d_gal), 5), "verdict": verdict,
+              "runtime_sec": round(time.time() - t0, 1)}
+    (out / "result.json").write_text(json.dumps(result))
+    print("\nRESULT_JSON", json.dumps(result), flush=True)
+    return result
+
+
 def run(config: dict) -> dict:
+    if config.get("kind") == "pl":
+        return run_pl(config)
     if config.get("kind") == "advval":
         return run_adv_validation(config)
     if config.get("kind") == "diagnose":
