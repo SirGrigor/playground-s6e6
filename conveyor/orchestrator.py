@@ -68,7 +68,8 @@ def render(config: dict, workdir: Path) -> str:
         "id": slug, "title": f"s6e6 cv {config['id']}"[:50], "code_file": "main.py",
         "language": "python", "kernel_type": "script", "is_private": True,
         "enable_gpu": bool(config.get("needs_gpu", True)), "enable_internet": True,
-        "competition_sources": [COMPETITION], "dataset_sources": [], "kernel_sources": [],
+        "competition_sources": [COMPETITION],
+        "dataset_sources": config.get("dataset_sources", []), "kernel_sources": [],
     }, indent=2))
     return slug
 

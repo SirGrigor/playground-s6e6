@@ -284,7 +284,84 @@ def run_pl(config: dict) -> dict:
     return result
 
 
+def run_priors(config: dict) -> dict:
+    """Original-SDSS17 BIN-LEVEL class-rate priors (domain lever #4) with the DECISIVE kill-test.
+    P(class | g-r bin, redshift bin) from 100K REAL external labels (a higher-fidelity estimate than any
+    synthetic row carries) — NOT a row-join (v2 proved that dead). KILL-TEST: do EXTERNAL-label priors beat
+    the SAME binning target-encoded from our OWN train labels? If external <= own, it is byte-redundant with
+    redshift (v3 lesson) -> kill. 3 arms on identical folds: baseline / +external-prior / +own-prior."""
+    import sys, glob
+    sys.stdout.reconfigure(line_buffering=True)
+    import numpy as np
+    from sklearn.metrics import balanced_accuracy_score
+    t0 = time.time()
+    train, test, synthetic = _load()
+    orig = None
+    for p in glob.glob("/kaggle/input/*/star_classification.csv") + glob.glob("/kaggle/input/**/star_classification.csv", recursive=True):
+        orig = pd.read_csv(p); print(f"[priors] external SDSS17: {p} {orig.shape}", flush=True); break
+    if orig is None:
+        orig = data.load_original()
+    if orig is None:
+        raise RuntimeError("no star_classification.csv — pass dataset_sources=['fedesoriano/stellar-classification-dataset-sdss17']")
+
+    Xdev, ydev, Xhold, yhold, Xte, info = _prep(train, test)
+    ydev = np.asarray(ydev); yhold = np.asarray(yhold); nf = int(config.get("n_folds", 5))
+
+    def cellcol(df):  # the (g-r bin x redshift bin) cell — Deotte's dominant cross
+        gr = (df["g"] - df["r"]).clip(-2, 4); z = df["redshift"].clip(-0.01, 1.0)
+        return (np.floor(gr * 2).astype("int32").astype(str) + "_" + np.floor(z * 10).astype("int32").astype(str))
+
+    # external prior P(class|cell) from the 100K REAL rows, smoothed toward the global external prior
+    oy = orig["class"].map(CLS2INT).to_numpy()
+    od = pd.DataFrame({"cell": cellcol(orig).to_numpy(), "y": oy})
+    pg = np.bincount(oy, minlength=len(CLASSES)).astype("float64"); pg /= pg.sum()
+    ct = od.groupby("cell")["y"].value_counts().unstack(fill_value=0).reindex(columns=range(len(CLASSES)), fill_value=0)
+    sm = 20.0
+    P = (ct.to_numpy() + sm * pg) / (ct.to_numpy().sum(1, keepdims=True) + sm)
+    emap = {c: P[i] for i, c in enumerate(ct.index)}
+    extf = lambda df: np.array([emap.get(x, pg) for x in cellcol(df).to_numpy()], dtype="float32")
+    edev, ehold, ete = extf(Xdev), extf(Xhold), extf(Xte)
+    print(f"[priors] external cells: {len(emap)} | train cell coverage "
+          f"{np.mean([x in emap for x in cellcol(Xdev).to_numpy()[:50000]]):.3f}", flush=True)
+
+    def arm(kind_):
+        X, Xh, Xt, inf = Xdev.copy(), Xhold.copy(), Xte.copy(), dict(info)
+        if kind_ == "ext":
+            for j, cl in enumerate(CLASSES):
+                X[f"extp_{cl}"], Xh[f"extp_{cl}"], Xt[f"extp_{cl}"] = edev[:, j], ehold[:, j], ete[:, j]
+            inf["num_cols"] = info["num_cols"] + [f"extp_{cl}" for cl in CLASSES]
+        elif kind_ == "own":   # same cell, target-encoded per-fold OOF from OUR labels (leak-safe via _fold_te)
+            X["gr_z_cell"] = cellcol(Xdev).astype("category")
+            Xh["gr_z_cell"] = cellcol(Xhold).astype("category")
+            Xt["gr_z_cell"] = cellcol(Xte).astype("category")
+            inf["combo_cols"] = info["combo_cols"] + ["gr_z_cell"]
+        oof, hold, _ = single_oof(X, ydev, Xh, Xt, inf, {"name": "lgb", "type": "lgb"}, nf)
+        from src.metrics import tune_class_weights, weighted_predict, competition_score
+        w, oof_ba = tune_class_weights(oof, ydev, labels=list(range(len(CLASSES))))
+        hold_ba = competition_score(np.asarray(CLASSES)[yhold], weighted_predict(hold, w, labels=CLASSES))
+        print(f"  [{kind_:8}] OOF {oof_ba:.5f} | holdout {hold_ba:.5f}", flush=True)
+        return round(float(oof_ba), 5), round(float(hold_ba), 5)
+
+    print("[priors] 3-arm ablation (identical folds):", flush=True)
+    base = arm("base"); ext = arm("ext"); own = arm("own")
+    d_ext, d_own = ext[1] - base[1], own[1] - base[1]
+    ext_beats_own = ext[1] > own[1] + 0.0001
+    verdict = ("EXTERNAL PRIOR ADDS NEW SIGNAL — pursue (beats own-label binning)" if d_ext > 0.0002 and ext_beats_own else
+               "REDUNDANT — external prior ~= own-label binning ~= redshift; kill" if not ext_beats_own else
+               "MARGINAL — external edges own but near noise")
+    print(f"\n[priors-verdict] Δext {d_ext:+.5f}  Δown {d_own:+.5f}  ext-beats-own={ext_beats_own}  → {verdict}", flush=True)
+    result = {"id": config.get("id"), "kind": "priors", "synthetic": synthetic,
+              "base_holdout": base[1], "ext_holdout": ext[1], "own_holdout": own[1],
+              "delta_ext": round(d_ext, 5), "delta_own": round(d_own, 5), "verdict": verdict,
+              "runtime_sec": round(time.time() - t0, 1)}
+    out = _outdir(); (out / "result.json").write_text(json.dumps(result))
+    print("\nRESULT_JSON", json.dumps(result), flush=True)
+    return result
+
+
 def run(config: dict) -> dict:
+    if config.get("kind") == "priors":
+        return run_priors(config)
     if config.get("kind") == "pl":
         return run_pl(config)
     if config.get("kind") == "advval":
