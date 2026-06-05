@@ -359,7 +359,69 @@ def run_priors(config: dict) -> dict:
     return result
 
 
+def run_prior_leg(config: dict) -> dict:
+    """BUILD the winning prior-augmented LGB leg (after priors1 proved external priors add +0.00042).
+    Bakes in BOTH validated signals: external-SDSS17 P(class|g-r bin, z bin) static features AND the
+    same cell target-encoded per-fold from our own labels. Persists aligned OOF/hold/test → a stackable
+    5th fleet leg (name 'lgbp'). Local fleet_stack with rm/tabm/tabm_b then produces the submission."""
+    import sys, glob
+    sys.stdout.reconfigure(line_buffering=True)
+    import numpy as np
+    from sklearn.metrics import balanced_accuracy_score
+    t0 = time.time()
+    train, test, synthetic = _load()
+    orig = None
+    for p in glob.glob("/kaggle/input/*/star_classification.csv") + glob.glob("/kaggle/input/**/star_classification.csv", recursive=True):
+        orig = pd.read_csv(p); break
+    if orig is None:
+        orig = data.load_original()
+    if orig is None:
+        raise RuntimeError("no star_classification.csv — pass dataset_sources=['fedesoriano/stellar-classification-dataset-sdss17']")
+    Xdev, ydev, Xhold, yhold, Xte, info = _prep(train, test)
+    ydev = np.asarray(ydev); yhold = np.asarray(yhold); nf = int(config.get("n_folds", 5))
+
+    def cellcol(df):
+        gr = (df["g"] - df["r"]).clip(-2, 4); z = df["redshift"].clip(-0.01, 1.0)
+        return (np.floor(gr * 2).astype("int32").astype(str) + "_" + np.floor(z * 10).astype("int32").astype(str))
+    oy = orig["class"].map(CLS2INT).to_numpy()
+    od = pd.DataFrame({"cell": cellcol(orig).to_numpy(), "y": oy})
+    pg = np.bincount(oy, minlength=len(CLASSES)).astype("float64"); pg /= pg.sum()
+    ct = od.groupby("cell")["y"].value_counts().unstack(fill_value=0).reindex(columns=range(len(CLASSES)), fill_value=0)
+    P = (ct.to_numpy() + 20.0 * pg) / (ct.to_numpy().sum(1, keepdims=True) + 20.0)
+    emap = {c: P[i] for i, c in enumerate(ct.index)}
+    extf = lambda df: np.array([emap.get(x, pg) for x in cellcol(df).to_numpy()], dtype="float32")
+
+    X, Xh, Xt, inf = Xdev.copy(), Xhold.copy(), Xte.copy(), dict(info)
+    ed, eh, et = extf(Xdev), extf(Xhold), extf(Xte)
+    for j, cl in enumerate(CLASSES):                       # external prior static features
+        X[f"extp_{cl}"], Xh[f"extp_{cl}"], Xt[f"extp_{cl}"] = ed[:, j], eh[:, j], et[:, j]
+    inf["num_cols"] = info["num_cols"] + [f"extp_{cl}" for cl in CLASSES]
+    X["gr_z_cell"] = cellcol(Xdev).astype("category")       # own-label cell TE (per-fold OOF)
+    Xh["gr_z_cell"] = cellcol(Xhold).astype("category"); Xt["gr_z_cell"] = cellcol(Xte).astype("category")
+    inf["combo_cols"] = info["combo_cols"] + ["gr_z_cell"]
+    print(f"[priorleg] built ext+own augmented LGB leg ({len(emap)} cells)", flush=True)
+
+    oof, hold, test_p = single_oof(X, ydev, Xh, Xt, inf, {"name": "lgbp", "type": "lgb"}, nf)
+    from src.metrics import tune_class_weights, weighted_predict, competition_score
+    w, oof_ba = tune_class_weights(oof, ydev, labels=list(range(len(CLASSES))))
+    hold_ba = competition_score(np.asarray(CLASSES)[yhold], weighted_predict(hold, w, labels=CLASSES))
+    print(f"[priorleg] lgbp OOF {oof_ba:.5f} | holdout {hold_ba:.5f}  (plain f-lgb was 0.96825)", flush=True)
+
+    out = _outdir()
+    np.save(out / "oof_lgbp.npy", oof); np.save(out / "hold_lgbp.npy", hold); np.save(out / "test_lgbp.npy", test_p)
+    np.save(out / "y_dev.npy", ydev); np.save(out / "y_hold.npy", yhold)
+    pd.DataFrame({ID: test[ID]}).to_csv(out / "test_ids.csv", index=False)
+    result = {"id": config.get("id"), "kind": "priorleg", "model": "lgbp", "synthetic": synthetic,
+              "oof": round(float(oof_ba), 5), "holdout": round(float(hold_ba), 5),
+              "runtime_sec": round(time.time() - t0, 1)}
+    (out / "result.json").write_text(json.dumps(result))
+    print("\nRESULT_JSON", json.dumps(result), flush=True)
+    return result
+
+
 def run(config: dict) -> dict:
+    if config.get("kind") == "priorleg":
+        return run_prior_leg(config)
     if config.get("kind") == "priors":
         return run_priors(config)
     if config.get("kind") == "pl":
