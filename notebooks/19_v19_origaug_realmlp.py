@@ -42,6 +42,10 @@ INTS = list(range(len(CLASSES)))
 NC = len(CLASSES)
 N_FOLDS = 5
 SEED = MODEL_SEED
+# v19 retest 2026-06-07: prior-corrected weighting HURT RealMLP (-0.0005), likely double-correcting
+# with our balanced-softmax loss. Test the EXACT proven public recipe = flat 0.35/row (no class
+# correction; let balanced-softmax own the prior). flat|prior.
+WEIGHT_MODE = "flat"
 SMOKE_CFG = {"n_ens": 2, "hidden_dims": [32], "epochs": 1, "eval_bs": 4096,
              "pbld_hidden_dim": 8, "pbld_out_dim": 3}
 
@@ -129,9 +133,10 @@ def main() -> None:
         ya = orig_prep[TARGET].map(CLS2INT).to_numpy()
         Xa, _, _ = build_rich_features(orig_prep, fit=False, state=state)
         Xa = Xa[Xdev.columns].reset_index(drop=True)
-        wa = per_class_weights(ydev, ya)
+        wa = per_class_weights(ydev, ya, mode=WEIGHT_MODE)
         aug = (Xa, ya, wa)
-        print(f"[aug] original rows={len(ya):,}  per-class weight uniq={np.round(np.unique(wa),4).tolist()}")
+        print(f"[aug] mode={WEIGHT_MODE}  original rows={len(ya):,}  "
+              f"weight uniq={np.round(np.unique(wa),4).tolist()}  mean={wa.mean():.3f}")
     else:
         print("[aug] no original data -> baseline only (smoke/local).")
 
@@ -177,14 +182,14 @@ def main() -> None:
 
     exp = Experiment.start(
         version="v19", parent="v15",
-        hypothesis="Per-class-weighted original-SDSS17 concat augmentation on the v14 RealMLP+FE leg "
-                   "(TE-encoded by the fold-train mapping, balanced-softmax prior pinned to competition "
-                   "counts) lifts the single from 0.96901 toward >0.9696 — the primary ceiling-break "
-                   "lever the locked 'three-paradigm ceiling' verdict missed.",
-        predicted_delta=0.0006, confidence="medium",
+        hypothesis=f"RETEST [{WEIGHT_MODE}]: prior-corrected concat augmentation HURT RealMLP "
+                   f"(-0.0005, double-correcting with balanced-softmax). The proven public recipe is "
+                   f"flat 0.35/row; let balanced-softmax own the prior. Test whether flat-weighted "
+                   f"original-SDSS17 concat lifts the v14 RealMLP+FE single (0.96896) past it.",
+        predicted_delta=0.0004, confidence="low",
         feature_changes=[], pipeline_changes=[
-            "original-SDSS17 concat into each RealMLP fold-train (leak-safe TE; val=comp rows only)",
-            "per-row sample_weight (comp=1.0, original=per-class w_c) via custom RealMLP loss",
+            f"original-SDSS17 concat into each RealMLP fold-train (leak-safe TE; val=comp rows only)",
+            f"per-row sample_weight mode={WEIGHT_MODE} (mean 0.35/row) via custom RealMLP loss",
             "balanced-softmax prior_counts pinned to competition fold-train"],
         cloud_or_local="cloud" if not synthetic else "local")
     exp.record(oof_score_mean=best_s_oof, oof_score_per_fold=per_fold, holdout_score=best_s_hold,
