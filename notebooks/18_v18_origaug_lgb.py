@@ -29,7 +29,7 @@ import numpy as np
 import pandas as pd
 
 from src import data
-from src.augment import BASE_W, per_class_weights, prep_original
+from src.augment import BASE_W, per_class_weights, prep_original, unify_categories
 from src.config import (CLASSES, ID, MODEL_SEED, PROBS, SUBMISSIONS, TARGET)
 from src.cv import stratified_folds
 from src.fe_realmlp import build_rich_features
@@ -106,20 +106,28 @@ def main() -> None:
     y_all = train[TARGET].map(CLS2INT).to_numpy()
     Xrich, info, state = build_rich_features(train, fit=True)
     Xte_rich, _, _ = build_rich_features(test, fit=False, state=state)
+
+    # --- augmentation frame, built BEFORE the holdout slice so categories can be unified across
+    # ALL frames (LightGBM requires the concatenated train frame's category sets to match its val).
+    aug_src = None
+    orig_prep = prep_original(orig)
+    if orig_prep is not None and len(orig_prep) > 0:
+        ya = orig_prep[TARGET].map(CLS2INT).to_numpy()
+        Xa, _, _ = build_rich_features(orig_prep, fit=False, state=state)   # SAME pipeline, aligned cols
+        Xa = Xa[Xrich.columns]                                             # identical column order
+        unify_categories([Xrich, Xte_rich, Xa])                           # shared category sets (LGB fix)
+        aug_src = (Xa.reset_index(drop=True), ya)
+
     dev_idx, hold_idx = data.holdout_split(train)
     Xdev, ydev = Xrich.iloc[dev_idx].reset_index(drop=True), y_all[dev_idx]
     Xhold, yhold = Xrich.iloc[hold_idx].reset_index(drop=True), y_all[hold_idx]
     yhold_names, ydev_names = INT2CLS[yhold], INT2CLS[ydev]
 
-    # --- augmentation frame (None on smoke) ---
     aug = None
-    orig_prep = prep_original(orig)
-    if orig_prep is not None and len(orig_prep) > 0:
-        ya = orig_prep[TARGET].map(CLS2INT).to_numpy()
-        Xa, _, _ = build_rich_features(orig_prep, fit=False, state=state)   # SAME pipeline, aligned cols
-        Xa = Xa[Xdev.columns]                                              # enforce identical column order
+    if aug_src is not None:
+        Xa, ya = aug_src
         wa = per_class_weights(ydev, ya)
-        aug = (Xa.reset_index(drop=True), ya, wa)
+        aug = (Xa, ya, wa)
         n_comp = np.bincount(ydev, minlength=3); n_orig = np.bincount(ya, minlength=3)
         print(f"[aug] original rows={len(ya):,}  per-class N comp={dict(zip(CLASSES, n_comp.tolist()))}  "
               f"orig={dict(zip(CLASSES, n_orig.tolist()))}")

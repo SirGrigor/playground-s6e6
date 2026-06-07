@@ -46,8 +46,27 @@ def prep_original(orig: pd.DataFrame | None) -> pd.DataFrame | None:
 
 
 def per_class_weights(y_comp_int: np.ndarray, y_orig_int: np.ndarray, base_w: float = BASE_W) -> np.ndarray:
-    """w_c = (N_c_comp / N_c_orig) * base_w for each original row's class — neutralises prior shift."""
+    """w_c = (N_c_comp / N_c_orig) * base_w for each original row's class — neutralises prior shift.
+
+    Per class c the original weight-mass = N_c_orig * w_c = base_w * N_c_comp, i.e. the augmentation
+    adds base_w x the competition mass PER CLASS, so the effective class distribution stays comp's."""
     n_comp = np.bincount(np.asarray(y_comp_int), minlength=len(CLASSES)).astype(float)
     n_orig = np.bincount(np.asarray(y_orig_int), minlength=len(CLASSES)).astype(float)
     factor = np.where(n_orig > 0, (n_comp / np.maximum(n_orig, 1.0)) * base_w, 0.0)
     return factor[np.asarray(y_orig_int)]
+
+
+def unify_categories(frames: list) -> list:
+    """Give every pandas-`category` column an IDENTICAL category set (the union across `frames`),
+    in place. Required by LightGBM for concat-augmentation: it compares the categorical_feature
+    definition of the train Dataset against the valid Dataset, so a train frame built by
+    pd.concat([fold_train, original]) (whose categories union) must still match its validation slice.
+    The RealMLP path does not need this (`_encode_frames` already shares a vocabulary)."""
+    if not frames:
+        return frames
+    cat_cols = [c for c in frames[0].columns if str(frames[0][c].dtype) == "category"]
+    for c in cat_cols:
+        cats = pd.Index(sorted(set().union(*[set(pd.Series(f[c]).dropna().unique()) for f in frames])))
+        for f in frames:
+            f[c] = pd.Categorical(f[c], categories=cats)
+    return frames
