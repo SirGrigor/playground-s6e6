@@ -45,15 +45,29 @@ def prep_original(orig: pd.DataFrame | None) -> pd.DataFrame | None:
     return df.reset_index(drop=True)
 
 
-def per_class_weights(y_comp_int: np.ndarray, y_orig_int: np.ndarray, base_w: float = BASE_W) -> np.ndarray:
-    """w_c = (N_c_comp / N_c_orig) * base_w for each original row's class — neutralises prior shift.
+def per_class_weights(y_comp_int: np.ndarray, y_orig_int: np.ndarray, base_w: float = BASE_W,
+                      mode: str = "prior") -> np.ndarray:
+    """Per-original-row sample weights. base_w is the AVERAGE original row weight (matches the proven
+    public recipe magnitude — original contributes ~base_w x its row-count of effective mass, i.e.
+    ~6-7% of competition mass at base_w=0.35), NOT a per-class mass fraction.
 
-    Per class c the original weight-mass = N_c_orig * w_c = base_w * N_c_comp, i.e. the augmentation
-    adds base_w x the competition mass PER CLASS, so the effective class distribution stays comp's."""
+    mode="flat": every original row = base_w (the public recipe, no prior correction).
+    mode="prior": relative weights ∝ N_c_comp / N_c_orig (so the WEIGHTED original class distribution
+      matches the competition's — the balanced-accuracy prior-shift correction), scaled so the mean
+      original row weight is still base_w. Derivation: w_c = (N_c_comp/N_c_orig) * base_w * N_orig/N_comp
+      → sum_c N_c_orig*w_c = base_w*N_orig → mean row weight = base_w.
+
+    v18 (2026-06-07) lesson: the earlier per-class-MASS form over-weighted OOD original data ~5x and
+    the LGBM axis test washed out; this magnitude fix keeps the prior correction at the proven scale.
+    """
+    y_orig = np.asarray(y_orig_int)
+    if mode == "flat":
+        return np.full(len(y_orig), float(base_w))
     n_comp = np.bincount(np.asarray(y_comp_int), minlength=len(CLASSES)).astype(float)
-    n_orig = np.bincount(np.asarray(y_orig_int), minlength=len(CLASSES)).astype(float)
-    factor = np.where(n_orig > 0, (n_comp / np.maximum(n_orig, 1.0)) * base_w, 0.0)
-    return factor[np.asarray(y_orig_int)]
+    n_orig = np.bincount(y_orig, minlength=len(CLASSES)).astype(float)
+    k = base_w * len(y_orig) / max(len(np.asarray(y_comp_int)), 1)        # = base_w * N_orig/N_comp
+    factor = np.where(n_orig > 0, (n_comp / np.maximum(n_orig, 1.0)) * k, 0.0)
+    return factor[y_orig]
 
 
 def unify_categories(frames: list) -> list:

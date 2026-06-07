@@ -123,16 +123,12 @@ def main() -> None:
     Xhold, yhold = Xrich.iloc[hold_idx].reset_index(drop=True), y_all[hold_idx]
     yhold_names, ydev_names = INT2CLS[yhold], INT2CLS[ydev]
 
-    aug = None
-    if aug_src is not None:
+    have_aug = aug_src is not None
+    if have_aug:
         Xa, ya = aug_src
-        wa = per_class_weights(ydev, ya)
-        aug = (Xa, ya, wa)
         n_comp = np.bincount(ydev, minlength=3); n_orig = np.bincount(ya, minlength=3)
-        print(f"[aug] original rows={len(ya):,}  per-class N comp={dict(zip(CLASSES, n_comp.tolist()))}  "
+        print(f"[aug] original rows={len(ya):,}  N comp={dict(zip(CLASSES, n_comp.tolist()))}  "
               f"orig={dict(zip(CLASSES, n_orig.tolist()))}")
-        print(f"[aug] per-class weight factor={[round(float(w),4) for w in np.unique(wa)] if len(wa) else []}  "
-              f"(BASE_W={BASE_W})")
     else:
         print("[aug] no original data -> baseline only (axis test cannot run; smoke/local).")
 
@@ -143,24 +139,35 @@ def main() -> None:
     b_rec = _recall(ydev_names, weighted_predict(b_oof, bw, labels=CLASSES))
     print(f"[baseline] OOF {b_s_oof:.5f} | holdout {b_s_hold:.5f} | recall {b_rec}")
 
-    # --- augmented ---
-    a_s_oof = a_s_hold = float("nan"); a_rec = {}; a_oof = a_hold = a_test = None; aw = bw
-    if aug is not None:
-        print("\n=== augmented LGBM (original concat, per-class weighted) ===")
-        a_oof, a_hold, a_test, _ = _lgb_oof(Xdev, ydev, Xhold, Xte_rich, aug=aug)
-        aw, a_s_oof, a_s_hold = _score(a_oof, a_hold, ydev, yhold_names)
-        a_rec = _recall(ydev_names, weighted_predict(a_oof, aw, labels=CLASSES))
-        print(f"[augmented] OOF {a_s_oof:.5f} | holdout {a_s_hold:.5f} | recall {a_rec}")
+    # --- augmented arms: flat (proven public recipe) vs prior (balanced-acc corrected). Both have
+    # mean original-row weight = BASE_W, so neither over-weights OOD data (the v18-v1 mistake). ---
+    arms = {}
+    if have_aug:
+        for mode in ("flat", "prior"):
+            wa = per_class_weights(ydev, ya, mode=mode)
+            print(f"\n=== augmented LGBM [{mode}]  mean_w={wa.mean():.3f}  uniq={np.round(np.unique(wa),3).tolist()} ===")
+            o, h, te, _ = _lgb_oof(Xdev, ydev, Xhold, Xte_rich, aug=(Xa, ya, wa))
+            w_, s_o, s_h = _score(o, h, ydev, yhold_names)
+            rec = _recall(ydev_names, weighted_predict(o, w_, labels=CLASSES))
+            arms[mode] = dict(oof=o, hold=h, test=te, w=w_, s_oof=s_o, s_hold=s_h, rec=rec)
+            print(f"[{mode}] OOF {s_o:.5f} (d{s_o-b_s_oof:+.5f}) | holdout {s_h:.5f} (d{s_h-b_s_hold:+.5f}) | recall {rec}")
 
-    # --- GATE evaluation ---
-    d_oof = (a_s_oof - b_s_oof) if aug is not None else float("nan")
-    qso_drop = (a_rec.get("QSO", 0) - b_rec.get("QSO", 0)) if aug is not None else float("nan")
-    star_drop = (a_rec.get("STAR", 0) - b_rec.get("STAR", 0)) if aug is not None else float("nan")
-    recall_safe = (aug is not None) and (qso_drop >= -0.0005) and (star_drop >= -0.0005)
-    gate_pass = (aug is not None) and (d_oof >= 0.0003) and recall_safe
-    note = (f"aug-axis: baseline OOF {b_s_oof:.5f} -> aug {a_s_oof:.5f} (delta {d_oof:+.5f}); "
-            f"QSO recall {qso_drop:+.4f}, STAR {star_drop:+.4f}; "
-            f"GATE {'PASS -> proceed v19 (RealMLP aug)' if gate_pass else 'FAIL/skip -> revisit weighting'}")
+    # --- pick best arm by OOF + GATE ---
+    best_mode = max(arms, key=lambda m: arms[m]["s_oof"]) if arms else None
+    if best_mode:
+        A = arms[best_mode]
+        a_oof, a_hold, a_test, aw = A["oof"], A["hold"], A["test"], A["w"]
+        a_s_oof, a_s_hold, a_rec = A["s_oof"], A["s_hold"], A["rec"]
+    else:
+        a_oof = a_hold = a_test = None; aw = bw; a_s_oof = a_s_hold = float("nan"); a_rec = {}
+    d_oof = (a_s_oof - b_s_oof) if best_mode else float("nan")
+    qso_drop = (a_rec.get("QSO", 0) - b_rec.get("QSO", 0)) if best_mode else float("nan")
+    star_drop = (a_rec.get("STAR", 0) - b_rec.get("STAR", 0)) if best_mode else float("nan")
+    recall_safe = bool(best_mode) and (qso_drop >= -0.0005) and (star_drop >= -0.0005)
+    gate_pass = bool(best_mode) and (d_oof >= 0.0003) and recall_safe
+    note = (f"aug-axis: baseline OOF {b_s_oof:.5f} -> best[{best_mode}] {a_s_oof:.5f} (delta {d_oof:+.5f}); "
+            f"QSO {qso_drop:+.4f}, STAR {star_drop:+.4f}; GATE "
+            f"{'PASS -> v19 (RealMLP aug, mode='+str(best_mode)+')' if gate_pass else 'FAIL -> LGBM saturated or axis weak; decide v19 on community evidence'}")
     print(f"\n[GATE] {note}")
 
     # --- persist + diary ---
@@ -169,31 +176,33 @@ def main() -> None:
     if a_oof is not None:
         np.save(PROBS / "v18_lgb_aug_oof.npy", a_oof); np.save(PROBS / "v18_lgb_aug_test.npy", a_test)
 
-    use_oof = a_oof if (aug is not None) else b_oof
-    use_w = aw if (aug is not None) else bw
-    best_s_oof = a_s_oof if (aug is not None) else b_s_oof
-    best_s_hold = a_s_hold if (aug is not None) else b_s_hold
+    has_aug = a_oof is not None
+    use_oof = a_oof if has_aug else b_oof
+    use_w = aw if has_aug else bw
+    best_s_oof = a_s_oof if has_aug else b_s_oof
+    best_s_hold = a_s_hold if has_aug else b_s_hold
     per_fold = [competition_score(ydev_names[va], weighted_predict(use_oof[va], use_w, labels=CLASSES))
                 for va in fva]
 
     exp = Experiment.start(
         version="v18", parent="v15",
-        hypothesis="Concatenating ~100K original SDSS17 rows into each LGBM training fold, per-class "
-                   "weighted w_c=(N_c_comp/N_c_orig)*0.35 (val on competition rows only), lifts the "
-                   "LGBM leg's OOF balanced-acc without degrading QSO/STAR recall — confirming the "
-                   "original-data CONCAT augmentation axis (distinct from the dead v2 leak-match).",
+        hypothesis="Concatenating ~100K original SDSS17 rows into each LGBM training fold (val on "
+                   "competition rows only), with mean original-row weight = BASE_W (proven recipe "
+                   "magnitude) under flat vs balanced-acc-corrected schemes, lifts the LGBM leg's OOF "
+                   "balanced-acc — the cheap axis probe for the original-data CONCAT lever.",
         predicted_delta=0.0004, confidence="medium",
         feature_changes=[], pipeline_changes=[
             "original-SDSS17 concat augmentation into each train fold (val=comp rows only, leak-safe)",
-            "per-class weight w_c=(N_c_comp/N_c_orig)*0.35 (prior-shift correction for balanced-acc)",
+            "two weight arms: flat (public 0.35/row) vs prior (class-corrected, mean=0.35/row)",
             "LGBM axis-confirmation leg (native sample_weight)"],
         cloud_or_local="cloud" if not synthetic else "local")
     exp.record(oof_score_mean=best_s_oof, oof_score_per_fold=per_fold, holdout_score=best_s_hold,
                runtime_sec=time.time() - t0,
                extra={"baseline_oof": b_s_oof, "baseline_hold": b_s_hold, "baseline_recall": b_rec,
-                      "aug_oof": a_s_oof, "aug_hold": a_s_hold, "aug_recall": a_rec,
+                      "best_mode": best_mode, "aug_oof": a_s_oof, "aug_hold": a_s_hold, "aug_recall": a_rec,
+                      "arms": {m: {"oof": A["s_oof"], "hold": A["s_hold"], "rec": A["rec"]} for m, A in arms.items()},
                       "delta_oof": d_oof, "qso_recall_delta": qso_drop, "star_recall_delta": star_drop,
-                      "gate_pass": gate_pass, "n_original": (0 if aug is None else int(len(aug[1]))),
+                      "gate_pass": gate_pass, "n_original": (int(len(ya)) if have_aug else 0),
                       "base_w": BASE_W})
     exp.note(note)
     exp.commit()
