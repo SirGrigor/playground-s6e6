@@ -232,8 +232,11 @@ def _param_groups(model, p):
     ]
 
 
-def _smooth_ce(y_true, y_pred, ls, prior_mult):
-    """Balanced-softmax (prior_mult) + label-smoothed cross-entropy. The metric-aware loss."""
+def _smooth_ce(y_true, y_pred, ls, prior_mult, w=None):
+    """Balanced-softmax (prior_mult) + label-smoothed cross-entropy. The metric-aware loss.
+
+    `w` (optional per-row weights, same length as the flattened batch) → weighted mean instead of
+    plain mean. Used by concat-augmentation (ladder v19) to down-weight appended original rows."""
     import torch
     n = y_pred.size(1)
     if prior_mult is not None:
@@ -241,7 +244,10 @@ def _smooth_ce(y_true, y_pred, ls, prior_mult):
         y_pred = y_pred / y_pred.sum(dim=1, keepdim=True).clamp_min(1e-15)
     y_smooth = torch.full_like(y_pred, ls / n)
     y_smooth.scatter_(1, y_true.unsqueeze(1), 1.0 - ls + ls / n)
-    return -(y_smooth * torch.log(y_pred.clamp(1e-15, 1))).sum(dim=1).mean()
+    per_row = -(y_smooth * torch.log(y_pred.clamp(1e-15, 1))).sum(dim=1)
+    if w is not None:
+        return (per_row * w).sum() / w.sum().clamp_min(1e-15)
+    return per_row.mean()
 
 
 class _Preprocessor:
@@ -270,8 +276,13 @@ class _Preprocessor:
         return X
 
 
-def _fit_one(Xn_tr, Xc_tr, y_tr, Xn_va, Xc_va, y_va, cat_dims, cfg):
-    """Train a single RealMLP (n_ens internal bag), EMA, return best-val proba predictor closure."""
+def _fit_one(Xn_tr, Xc_tr, y_tr, Xn_va, Xc_va, y_va, cat_dims, cfg, sw_tr=None, prior_counts=None):
+    """Train a single RealMLP (n_ens internal bag), EMA, return best-val proba predictor closure.
+
+    sw_tr: optional per-train-row sample weights (concat-augmentation, v19) → weighted loss.
+    prior_counts: optional class counts driving the balanced-softmax prior_mult. When augmenting,
+    pass the COMPETITION fold-train counts so the metric-aware loss still targets the competition
+    class balance (not the augmented mix). Defaults to bincount(y_tr) (unchanged behaviour)."""
     import torch
     from sklearn.metrics import balanced_accuracy_score
 
@@ -283,6 +294,7 @@ def _fit_one(Xn_tr, Xc_tr, y_tr, Xn_va, Xc_va, y_va, cat_dims, cfg):
 
     pre = _Preprocessor(cfg["tfms"]).fit(Xn_tr)
     Xn_tr, Xn_va = pre.transform(Xn_tr), pre.transform(Xn_va)
+    swt = torch.as_tensor(np.asarray(sw_tr), dtype=torch.float32, device=dev) if sw_tr is not None else None
 
     if cfg.get("arch") == "ft":
         from .fttransformer import build_fttransformer
@@ -294,7 +306,8 @@ def _fit_one(Xn_tr, Xc_tr, y_tr, Xn_va, Xc_va, y_va, cat_dims, cfg):
     # balanced-softmax prior multipliers (the metric-aware term)
     prior_mult = None
     if cfg["loss_prior_power"] != 0.0:
-        counts = np.bincount(y_tr, minlength=n_classes).astype("float64")
+        counts = (np.asarray(prior_counts, dtype="float64") if prior_counts is not None
+                  else np.bincount(y_tr, minlength=n_classes).astype("float64"))
         counts = counts / np.exp(np.log(counts).mean())
         prior_mult = torch.as_tensor(np.power(counts, cfg["loss_prior_power"]), dtype=torch.float32, device=dev)
 
@@ -329,7 +342,8 @@ def _fit_one(Xn_tr, Xc_tr, y_tr, Xn_va, Xc_va, y_va, cat_dims, cfg):
             drop_val = _schedule(cfg["dropout"], progress, cfg["p_drop_sched"], cfg["flat_ratio"])
             for dm in model._drops:
                 dm.p = drop_val
-            loss = _smooth_ce(ytt[idx].repeat_interleave(n_ens), pred.reshape(-1, n_classes), ls_val, prior_mult)
+            wb = swt[idx].repeat_interleave(n_ens) if swt is not None else None
+            loss = _smooth_ce(ytt[idx].repeat_interleave(n_ens), pred.reshape(-1, n_classes), ls_val, prior_mult, w=wb)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), cfg["grad_clip"])
             opt.step()
@@ -449,14 +463,19 @@ def _encode_frames(frames, cat_cols, num_cols):
     return num_arrays, cat_arrays, cat_dims
 
 
-def realmlp_fit_predict(X_tr, y_tr, X_val, y_val, evals: dict, cfg: dict | None = None):
+def realmlp_fit_predict(X_tr, y_tr, X_val, y_val, evals: dict, cfg: dict | None = None,
+                        sample_weight=None, prior_counts=None):
     """Train ONE RealMLP (n_ens internal bag); X_val drives best-epoch; predict X_val + each frame
     in `evals`. Returns (val_proba, {name: proba}). For per-fold harnesses that inject fold-specific
-    features (e.g. target encoding) before training — the OOF folding is the caller's job."""
+    features (e.g. target encoding) before training — the OOF folding is the caller's job.
+
+    sample_weight: optional per-train-row weights (concat-augmentation, v19). prior_counts: optional
+    class counts for the balanced-softmax prior (pass competition-only counts when augmenting)."""
     cfg = {**DEFAULT_CFG, **(cfg or {})}
     cat_cols = [c for c in X_tr.columns if str(X_tr[c].dtype) == "category"]
     num_cols = [c for c in X_tr.columns if c not in cat_cols]
     keys = list(evals.keys())
     nums, cats, cat_dims = _encode_frames([X_tr, X_val] + [evals[k] for k in keys], cat_cols, num_cols)
-    predict, _ = _fit_one(nums[0], cats[0], np.asarray(y_tr), nums[1], cats[1], np.asarray(y_val), cat_dims, cfg)
+    predict, _ = _fit_one(nums[0], cats[0], np.asarray(y_tr), nums[1], cats[1], np.asarray(y_val), cat_dims,
+                          cfg, sw_tr=sample_weight, prior_counts=prior_counts)
     return predict(nums[1], cats[1]), {k: predict(nums[2 + i], cats[2 + i]) for i, k in enumerate(keys)}
