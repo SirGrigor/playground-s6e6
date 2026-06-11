@@ -59,9 +59,21 @@ def _load():
     return full.iloc[:6000].reset_index(drop=True), full.iloc[6000:].drop(columns=[TARGET]).reset_index(drop=True), True
 
 
-def _prep(train, test):
+def _prep(train, test, artifacts: bool = False):
     Xrich, info, state = build_rich_features(train, fit=True)
     Xte, _, _ = build_rich_features(test, fit=False, state=state)
+    if artifacts:  # v20 lever as a stack-leg axis: quantization fingerprints (src/artifacts.py)
+        from src.artifacts import add_artifact_features
+        a_tr, a_te = add_artifact_features(train).reset_index(drop=True), add_artifact_features(test).reset_index(drop=True)
+        cats = [c for c in a_tr.columns if str(a_tr[c].dtype) == "category"]
+        for c in cats:  # union categories so train/test codes agree (LGBM splits on codes)
+            union = sorted(set(a_tr[c].cat.categories) | set(a_te[c].cat.categories))
+            a_tr[c] = a_tr[c].cat.set_categories(union); a_te[c] = a_te[c].cat.set_categories(union)
+        Xrich = pd.concat([Xrich.reset_index(drop=True), a_tr], axis=1)
+        Xte = pd.concat([Xte.reset_index(drop=True), a_te], axis=1)
+        info = {**info, "native_cat_cols": info["native_cat_cols"] + cats,
+                "num_cols": info["num_cols"] + [c for c in a_tr.columns if c not in cats]}
+        print(f"[artifacts] +{a_tr.shape[1]} features ({len(cats)} cat)")
     y_all = train[TARGET].map(CLS2INT).to_numpy()
     dev_idx, hold_idx = data.holdout_split(train)
     return (Xrich.iloc[dev_idx].reset_index(drop=True), y_all[dev_idx],
@@ -77,7 +89,7 @@ def run_single(config: dict) -> dict:
     t0 = time.time()
     train, test, synthetic = _load()
     spec = config["single"]   # {"name","type":"lgb"|"nn","base":...,"cfg":...}
-    Xdev, ydev, Xhold, yhold, Xte, info = _prep(train, test)
+    Xdev, ydev, Xhold, yhold, Xte, info = _prep(train, test, artifacts=bool(config.get("artifacts")))
     print(f"[single] id={config.get('id')} model={spec['name']} train={train.shape}")
     oof, hold, test_p = single_oof(Xdev, ydev, Xhold, Xte, info, spec, int(config.get("n_folds", 5)))
     w, s_oof = tune_class_weights(oof, ydev, labels=INTS)
